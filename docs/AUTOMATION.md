@@ -4,75 +4,60 @@
 
 深研必须一次只研究一只股票。个股研究再拆成战略和财务两类：
 
-1. `MyInvestStock A可跟踪龙头发现队列`
-2. `MyInvestStock 个股战略深研 {code} {name}`
-3. `MyInvestStock 个股财务估值深研 {code} {name}`
+1. `MyInvestStock 推荐龙头读取入队`
+2. `MyInvestStock 个股深研队列消化`
+3. `MyInvestStock 个股战略深研 {code} {name}`
+4. `MyInvestStock 个股财务估值深研 {code} {name}`
 
-## 发现队列任务
+## 推荐龙头读取入队自动化
 
-用途：读取 `/api/index`，更新今日待研队列，不做深研。
+用途：每天在市场研究、主线研究、龙头研究完成之后，读取 `/api/index`，更新今日待研队列，不做深研。
 
 规则：
 
 - 每只股票如果没有战略底稿，生成一条战略深研任务。
 - 每次进入 `A可跟踪龙头` 时都可以生成财务估值深研任务。
 - 战略深研默认只做一次；财务估值深研可以多次刷新。
+- 本任务只做入队和状态汇总，不领取个股研究任务。
 
 提示词：
 
 ```text
-在 C:\Users\kunpeng\Documents\MyInvestStock 中运行每日发现队列。
+执行 MyInvestStock 推荐龙头读取入队。
+
+触发前提：这是市场研究、主线研究、龙头研究完成之后的下游入口更新任务。先检查 https://leader.okbbc.com/api/index 是否已经更新完成。只接受 /api/index 中 report.basis_date 已经是最新完整数据可用的交易日，且 key_results.primary_output.items 非空的结果。如果 /api/index 未更新、为空、请求失败，或 report_id 与上一轮完全相同且本地队列已处理过，则停止并汇报原因。
 
 只读取 https://leader.okbbc.com/api/index，并且只使用 key_results.primary_output.items 作为今日 A可跟踪龙头研究对象。禁止从 /api/latest 的 themes[].stock_leaders 扩展股票池。
 
-运行 scripts/ingest_index.py 更新本地 SQLite 队列。完成后汇报 report_id、basis_date、入库股票数量、股票代码和名称，以及生成了哪些 strategic / financial 任务。不要输出 .env 内容。
+运行 python scripts/ingest_index.py 更新本地 SQLite 队列。只做入队和状态汇总，不领取 research_queue 任务，不生成个股深研正文，不调用个股战略或财务深研提示词。
+
+完成后验证 http://127.0.0.1:8016/api/index 和 http://127.0.0.1:8016/api/latest，汇报 report_id、basis_date、入库股票数量、股票代码和名称，以及生成或保持的 strategic / financial 队列数量。不要输出 .env 内容，不要提交 .env、data/local/*.sqlite、data/raw/*.json。
 ```
 
-## 收盘后总编排自动化提示词
+## 个股深研队列消化自动化
 
-用途：每天收盘后，在市场研究、主线研究、龙头研究完成之后，再启动 MyInvestStock 的个股研究流程。
+用途：高频运行，持续消化本地待研究队列。每次运行只处理一条任务，处理完即结束；靠下一次自动化继续领取下一条任务。
 
-建议自动化名称：
+规则：
 
-```text
-MyInvestStock 收盘后个股深研编排
-```
-
-建议运行目录：
-
-```text
-C:\Users\kunpeng\Documents\MyInvestStock
-```
+- 只从本地 `research_queue` 读取 pending 任务，不重新扩展股票池。
+- 每次只研究一只股票、一个任务类型。
+- strategic 任务只做战略和竞争研究，不写估值区间。
+- financial 任务必须依赖已有 strategic 底稿，可以多次刷新估值和财务结论。
+- 如果队列为空，汇报队列为空，不生成研究正文。
 
 提示词：
 
 ```text
-在 C:\Users\kunpeng\Documents\MyInvestStock 中执行收盘后个股深研编排。
+执行 MyInvestStock 个股深研队列消化。
 
-触发前提：
-- 这是市场研究、主线研究、龙头研究之后的下游任务。
-- 先检查 https://leader.okbbc.com/api/index 是否已经更新完成。
-- 只接受 /api/index 中 report.basis_date 已经是最新可用交易日，且 key_results.primary_output.items 非空的结果。
-- 如果 /api/index 未更新、为空、请求失败，或 report_id 与上一轮完全相同且本地队列已处理过，则停止，不做深研。
-
-固定入口：
-- 只读取 https://leader.okbbc.com/api/index。
-- 只使用 key_results.primary_output.items 作为 A可跟踪龙头研究对象。
-- 禁止从上游 /api/latest 的 themes[].stock_leaders、stock_deep_research.stocks 或其他候选矩阵扩展股票池。
+核心原则：每次自动化运行只处理一条 pending 队列任务，只研究一只股票。不要一次研究多只股票，不要在一个提示词里混合多个股票。不要重新扩展股票池，不要从上游 /api/latest 或其他候选矩阵添加股票。
 
 执行步骤：
-1. 运行 python scripts/ingest_index.py 更新本地 SQLite 队列。
-2. 读取 /api/queue 或 research_queue，按 priority、stage 排序，只领取一条 pending 任务。
-3. 每次自动化运行只处理一个任务，不要一次研究多只股票，也不要在一个提示词里混合多个股票。
-4. 如果领取到 strategic 任务：
-   - 只研究这一只股票的行业位置、市场空间、竞争格局、上下游、战略壁垒、五倍/十倍潜力和战略证伪条件。
-   - 不写估值区间，不写买卖建议。
-   - 输出 task_type='strategic' 的结构化 JSON，并通过 scripts/import_research_run.py 入库。
-5. 如果领取到 financial 任务：
-   - 先确认该股票已有 task_type='strategic' 的战略底稿。
-   - 如果没有战略底稿，把该 financial 任务标记为 blocked，并停止。
-   - 如果有战略底稿，只研究财务质量、增长率、估值方法、合理估值区间、当前价格位置、五倍/十倍潜力财务校验、重仓研究资格和财务证伪条件。
-   - 输出 task_type='financial' 的结构化 JSON，并通过 scripts/import_research_run.py 入库。
+1. 在本地队列中读取下一条 pending 任务，优先使用 python scripts/generate_single_stock_prompt.py --next 生成本次唯一研究提示词。
+2. 如果没有待研究任务，验证 http://127.0.0.1:8016/api/index 和 http://127.0.0.1:8016/api/latest 可用后，汇报“队列为空”，本次结束。
+3. 如果领取到 strategic 任务：只研究这一只股票的行业位置、市场空间、竞争格局、上下游、战略壁垒、五倍/十倍潜力和战略证伪条件；不写估值区间，不写买卖建议；输出 task_type='strategic' 的结构化 JSON，并通过 scripts/import_research_run.py 入库。
+4. 如果领取到 financial 任务：先确认该股票已有 task_type='strategic' 的战略底稿；如果没有战略底稿，把该 financial 任务标记为 blocked，并停止；如果有战略底稿，只研究财务质量、增长率、估值方法、合理估值区间、当前价格位置、五倍/十倍潜力财务校验、重仓研究资格和财务证伪条件；输出 task_type='financial' 的结构化 JSON，并通过 scripts/import_research_run.py 入库。
 
 数据原则：
 - Tushare 是 A 股结构化主源，使用本地 .env，但不要输出任何 token。
@@ -83,7 +68,7 @@ C:\Users\kunpeng\Documents\MyInvestStock
 完成后：
 - 验证 http://127.0.0.1:8016/api/index 返回 200。
 - 验证 http://127.0.0.1:8016/api/latest 返回 200。
-- 汇报本次处理的 report_id、basis_date、任务类型、股票代码、股票名称、入库状态、主要结论摘要。
+- 汇报本次处理的任务类型、股票代码、股票名称、入库状态、主要结论摘要。
 - 不要提交 .env、data/local/*.sqlite、data/raw/*.json。
 ```
 
@@ -170,8 +155,8 @@ C:\Users\kunpeng\Documents\MyInvestStock
 
 每日主线龙头更新后：
 
-1. 运行发现队列。
-2. 按 `deep_score` 从高到低领取任务。
+1. 运行 `MyInvestStock 推荐龙头读取入队`，只更新队列。
+2. `MyInvestStock 个股深研队列消化` 高频运行，每次只领取一条任务。
 3. 如果没有战略底稿，先做战略深研。
 4. 战略底稿已存在后，多次做财务估值深研。
-5. 再领取下一条任务，直到队列完成或达到当日研究预算。
+5. 研究完一条就结束，下一次自动化再领取下一条，直到队列为空。
