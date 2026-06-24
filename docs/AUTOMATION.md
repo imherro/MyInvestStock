@@ -42,10 +42,13 @@
 
 - 只从本地 `research_queue` 领取 pending 任务，不重新扩展股票池。
 - 领取任务时把状态标记为 `in_progress`，避免高频自动化重复处理同一项。
+- 同时把系统级 `task_queue` 状态从 `PENDING` 切到 `RUNNING`；入库完成后切到 `DONE`。
+- `RUNNING` 超过 30 分钟会恢复为 `FAILED`，重新入队时经 `RETRY` 回到 `PENDING`。
 - 每次只研究一只股票、一个任务类型。
 - strategic 任务只做战略和竞争研究，不写估值区间。
 - financial 任务必须依赖已有 strategic 底稿，可以多次刷新估值和财务结论。
 - strategic 底稿未完成时，不提前领取对应 financial 任务。
+- `run_id` 由 `stock_code + task_type + research_date + schema_version` 计算，数据库唯一，防止重复研究。
 - 如果队列为空，汇报队列为空，不生成研究正文。
 
 提示词：

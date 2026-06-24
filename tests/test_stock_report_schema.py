@@ -9,13 +9,13 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from core.schema.stock_report import StockResearchReport, validate_stock_research_report
+from core.task.state import compute_task_run_id
 from myinveststock.db import connect, init_db, insert_research_run
 
 
 def valid_financial_sample() -> dict[str, object]:
     return {
         "schema_version": "stock_research_report.v1",
-        "run_id": "run-600519-20260624",
         "stock_code": "600519.SH",
         "stock_name": "贵州茅台",
         "source_report_id": "leader_review_2026-06-24",
@@ -87,6 +87,10 @@ class StockReportSchemaTests(unittest.TestCase):
         report = validate_stock_research_report(valid_financial_sample())
         self.assertIsInstance(report, StockResearchReport)
         self.assertEqual(report.stock_code, "600519.SH")
+        self.assertEqual(
+            report.run_id,
+            compute_task_run_id("600519.SH", "financial", "2026-06-24", "stock_research_report.v1"),
+        )
         self.assertEqual(report.model_dump(mode="json")["valuation"]["intrinsic_value_mid"], 1500.0)
 
     def test_invalid_sample_rejects_extra_dict_passthrough(self) -> None:

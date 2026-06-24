@@ -3,13 +3,16 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
 from core.schema.stock_report import StockResearchReport
+from core.task.state import TaskStatus, compute_task_id, compute_task_run_id, validate_transition
 
 from .config import DB_PATH
+
+REPORT_SCHEMA_VERSION = "stock_research_report.v1"
 
 
 def utc_now() -> str:
@@ -23,6 +26,15 @@ def connect(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    if column not in _table_columns(conn, table):
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
 def init_db(db_path: Path | str = DB_PATH) -> None:
@@ -74,6 +86,8 @@ def init_db(db_path: Path | str = DB_PATH) -> None:
                 priority INTEGER NOT NULL,
                 stage INTEGER NOT NULL,
                 task_type TEXT NOT NULL,
+                task_id TEXT,
+                run_id TEXT,
                 depends_on_task_type TEXT,
                 status TEXT NOT NULL DEFAULT 'pending',
                 task_keyword TEXT NOT NULL,
@@ -113,12 +127,34 @@ def init_db(db_path: Path | str = DB_PATH) -> None:
                 raw_json TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS task_queue (
+                task_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL UNIQUE,
+                stock_code TEXT NOT NULL,
+                task_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                error_message TEXT
+            );
+
             CREATE INDEX IF NOT EXISTS idx_trackable_code
                 ON trackable_leaders(code);
             CREATE INDEX IF NOT EXISTS idx_queue_status
                 ON research_queue(status, priority);
+            CREATE INDEX IF NOT EXISTS idx_task_queue_status
+                ON task_queue(status, updated_at);
             CREATE INDEX IF NOT EXISTS idx_runs_code_date
                 ON stock_research_runs(code, research_date);
+            """
+        )
+        _ensure_column(conn, "research_queue", "task_id", "TEXT")
+        _ensure_column(conn, "research_queue", "run_id", "TEXT")
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_queue_run_id
+                ON research_queue(run_id)
             """
         )
         conn.commit()
@@ -126,6 +162,152 @@ def init_db(db_path: Path | str = DB_PATH) -> None:
 
 def _json(value: Any) -> str:
     return json.dumps(value if value is not None else [], ensure_ascii=False, sort_keys=True)
+
+
+def task_status_to_queue_status(status: TaskStatus) -> str:
+    if status == TaskStatus.RUNNING:
+        return "in_progress"
+    if status == TaskStatus.DONE:
+        return "complete"
+    if status in {TaskStatus.FAILED, TaskStatus.BLOCKED}:
+        return "blocked"
+    return "pending"
+
+
+def queue_status_to_task_status(status: str) -> TaskStatus:
+    mapping = {
+        "pending": TaskStatus.PENDING,
+        "in_progress": TaskStatus.RUNNING,
+        "complete": TaskStatus.DONE,
+        "blocked": TaskStatus.BLOCKED,
+    }
+    if status not in mapping:
+        raise ValueError(f"unsupported queue status: {status}")
+    return mapping[status]
+
+
+def transition_task_status(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    target: TaskStatus,
+    error_message: str | None = None,
+) -> None:
+    row = conn.execute(
+        """
+        SELECT status, retry_count
+        FROM task_queue
+        WHERE run_id = ?
+        """,
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"missing task for run_id={run_id}")
+    current = TaskStatus(row["status"])
+    validate_transition(current, target)
+    retry_count = int(row["retry_count"])
+    if target == TaskStatus.RETRY and current == TaskStatus.FAILED:
+        retry_count += 1
+    conn.execute(
+        """
+        UPDATE task_queue
+        SET status = ?, retry_count = ?, updated_at = ?, error_message = ?
+        WHERE run_id = ?
+        """,
+        (target.value, retry_count, utc_now(), error_message, run_id),
+    )
+
+
+def idempotent_enqueue_task(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    run_id: str,
+    stock_code: str,
+    task_type: str,
+    now: str,
+) -> TaskStatus:
+    row = conn.execute(
+        """
+        SELECT status
+        FROM task_queue
+        WHERE run_id = ?
+        """,
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        conn.execute(
+            """
+            INSERT INTO task_queue (
+                task_id, run_id, stock_code, task_type, status,
+                retry_count, created_at, updated_at, error_message
+            )
+            VALUES (?, ?, ?, ?, ?, 0, ?, ?, NULL)
+            """,
+            (task_id, run_id, stock_code, task_type, TaskStatus.PENDING.value, now, now),
+        )
+        return TaskStatus.PENDING
+
+    status = TaskStatus(row["status"])
+    if status == TaskStatus.FAILED:
+        transition_task_status(conn, run_id=run_id, target=TaskStatus.RETRY)
+        transition_task_status(conn, run_id=run_id, target=TaskStatus.PENDING)
+        return TaskStatus.PENDING
+    if status == TaskStatus.RETRY:
+        transition_task_status(conn, run_id=run_id, target=TaskStatus.PENDING)
+        return TaskStatus.PENDING
+    return status
+
+
+def recover_stale_running_tasks(conn: sqlite3.Connection, *, stale_after_minutes: int = 30) -> int:
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=stale_after_minutes)
+    rows = list(
+        conn.execute(
+            """
+            SELECT run_id, updated_at
+            FROM task_queue
+            WHERE status = ?
+            """,
+            (TaskStatus.RUNNING.value,),
+        )
+    )
+    recovered = 0
+    for row in rows:
+        try:
+            updated_at = datetime.fromisoformat(row["updated_at"])
+        except ValueError:
+            updated_at = datetime.min.replace(tzinfo=timezone.utc)
+        if updated_at <= cutoff:
+            transition_task_status(
+                conn,
+                run_id=row["run_id"],
+                target=TaskStatus.FAILED,
+                error_message=f"RUNNING exceeded {stale_after_minutes} minutes",
+            )
+            conn.execute(
+                """
+                UPDATE research_queue
+                SET status = 'blocked', updated_at = ?
+                WHERE run_id = ?
+                """,
+                (utc_now(), row["run_id"]),
+            )
+            recovered += 1
+    return recovered
+
+
+def list_orphan_tasks(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return list(
+        conn.execute(
+            """
+            SELECT t.*
+            FROM task_queue t
+            LEFT JOIN research_queue q ON q.run_id = t.run_id
+            WHERE q.run_id IS NULL
+            ORDER BY t.created_at, t.run_id
+            """
+        )
+    )
 
 
 def upsert_report(
@@ -245,20 +427,35 @@ def upsert_queue_item(
     task_keyword: str,
     prompt: str,
     depends_on_task_type: str | None,
+    task_date: str | None,
     now: str,
 ) -> None:
+    run_id = compute_task_run_id(code, task_type, task_date or report_id, REPORT_SCHEMA_VERSION)
+    task_id = compute_task_id(run_id)
+    task_status = idempotent_enqueue_task(
+        conn,
+        task_id=task_id,
+        run_id=run_id,
+        stock_code=code,
+        task_type=task_type,
+        now=now,
+    )
+    queue_status = task_status_to_queue_status(task_status)
     conn.execute(
         """
         INSERT INTO research_queue (
-            report_id, code, name, priority, stage, task_type, depends_on_task_type,
+            report_id, code, name, priority, stage, task_type, task_id, run_id, depends_on_task_type,
             status, task_keyword, prompt, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(report_id, code, task_type) DO UPDATE SET
             name=excluded.name,
             priority=excluded.priority,
             stage=excluded.stage,
+            task_id=excluded.task_id,
+            run_id=excluded.run_id,
             depends_on_task_type=excluded.depends_on_task_type,
+            status=excluded.status,
             task_keyword=excluded.task_keyword,
             prompt=excluded.prompt,
             updated_at=excluded.updated_at
@@ -270,7 +467,10 @@ def upsert_queue_item(
             priority,
             stage,
             task_type,
+            task_id,
+            run_id,
             depends_on_task_type,
+            queue_status,
             task_keyword,
             prompt,
             now,
@@ -347,7 +547,9 @@ def next_queue_item(conn: sqlite3.Connection) -> sqlite3.Row | None:
         """
         SELECT q.*
         FROM research_queue q
+        JOIN task_queue t ON t.run_id = q.run_id
         WHERE q.status = 'pending'
+          AND t.status = 'PENDING'
           AND (
               q.depends_on_task_type IS NULL
               OR EXISTS (
@@ -367,10 +569,12 @@ def next_queue_item(conn: sqlite3.Connection) -> sqlite3.Row | None:
 def claim_next_queue_item(conn: sqlite3.Connection) -> sqlite3.Row | None:
     now = utc_now()
     conn.execute("BEGIN IMMEDIATE")
+    recover_stale_running_tasks(conn)
     row = next_queue_item(conn)
     if row is None:
         conn.commit()
         return None
+    transition_task_status(conn, run_id=row["run_id"], target=TaskStatus.RUNNING)
     conn.execute(
         """
         UPDATE research_queue
@@ -500,6 +704,31 @@ def mark_queue_status(
     report_id: str | None = None,
 ) -> None:
     now = utc_now()
+    if report_id:
+        rows = list(
+            conn.execute(
+                """
+                SELECT DISTINCT run_id
+                FROM research_queue
+                WHERE code = ? AND task_type = ? AND report_id = ? AND run_id IS NOT NULL
+                """,
+                (code, task_type, report_id),
+            )
+        )
+    else:
+        rows = list(
+            conn.execute(
+                """
+                SELECT DISTINCT run_id
+                FROM research_queue
+                WHERE code = ? AND task_type = ? AND run_id IS NOT NULL
+                """,
+                (code, task_type),
+            )
+        )
+    target = queue_status_to_task_status(status)
+    for row in rows:
+        transition_task_status(conn, run_id=row["run_id"], target=target)
     if report_id:
         conn.execute(
             """

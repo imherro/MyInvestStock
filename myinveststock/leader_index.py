@@ -26,6 +26,8 @@ STOCK_REPORT_SCHEMA_INSTRUCTION = """结构化输出要求：
 - 顶层字段固定为：schema_version, run_id, stock_code, stock_name, source_report_id, task_type, research_date, status, title, summary, industry_position, competition_landscape, upstream_downstream, annual_growth, multi_bagger_potential, heavy_position_view, fundamentals, valuation, peer_comparison, risk, conclusion, evidence, assumptions。
 - 禁止输出 schema 以外的额外字段；禁止把未定义内容塞进自由 dict。
 - stock_code 使用唯一研究对象代码，stock_name 使用唯一研究对象名称，source_report_id 使用入口 report_id。
+- research_date 必须使用入口 basis_date。
+- run_id 必须等于 hash(stock_code + task_type + research_date + schema_version)，可省略让导入端自动生成；如果提供错误 run_id 会被拒绝。
 - fundamentals 必须包含 revenue_growth, profit_growth, roe, debt_ratio, revenue_quality, profit_quality, cash_flow_quality, balance_sheet_quality。
 - valuation 必须包含 pe, pb, peg, intrinsic_value_low, intrinsic_value_mid, intrinsic_value_high, unit, method, confidence, key_assumptions。
 - peer_comparison 必须包含 industry_rank, competitors, relative_valuation, competitive_position。
@@ -222,6 +224,7 @@ def ingest_payload(
                     task_keyword=f"MyInvestStock 个股战略深研 {item['code']} {item['name']}",
                     prompt=build_strategic_prompt(item, report),
                     depends_on_task_type=None,
+                    task_date=report.get("basis_date"),
                     now=now,
                 )
             upsert_queue_item(
@@ -235,6 +238,7 @@ def ingest_payload(
                 task_keyword=f"MyInvestStock 个股财务估值深研 {item['code']} {item['name']}",
                 prompt=build_financial_prompt(item, report),
                 depends_on_task_type="strategic",
+                task_date=report.get("basis_date"),
                 now=now,
             )
         conn.commit()

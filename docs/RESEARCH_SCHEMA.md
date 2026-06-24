@@ -9,7 +9,7 @@
 统一研究 JSON 的顶层字段：
 
 - `schema_version`：固定为 `stock_research_report.v1`。
-- `run_id`：本次研究运行 ID；缺省时由 schema 根据 report、股票、任务类型、日期和标题生成。
+- `run_id`：本次研究运行 ID；缺省时由 schema 根据 `stock_code + task_type + research_date + schema_version` 生成。
 - `stock_code`：股票代码，例如 `600519.SH`。
 - `stock_name`：股票名称。
 - `source_report_id`：上游 `/api/index` 的 `report_id`。
@@ -30,9 +30,40 @@
 
 - schema 禁止额外字段。
 - `heavy_position_view` 必须等于 `conclusion.grade`。
+- 如果显式提供 `run_id`，必须等于系统计算值，否则拒绝入库。
 - `strategic` 不允许写入估值区间。
 - `financial` 必须写入完整估值区间，且 `low <= mid <= high`。
 - DB 写入函数 `insert_research_run` 只接受通过校验的 `StockResearchReport`，不接受 raw dict。
+
+## 任务状态机
+
+`task_queue` 是系统级任务控制表，和展示用 `research_queue` 通过 `run_id` 关联。
+
+字段：
+
+- `task_id`：由 `run_id` 派生的任务 ID。
+- `run_id`：全局唯一，数据库强制 `UNIQUE(run_id)`。
+- `stock_code`、`task_type`：任务对象。
+- `status`：`PENDING`、`RUNNING`、`DONE`、`FAILED`、`BLOCKED`、`RETRY`。
+- `retry_count`：失败重试次数。
+- `created_at`、`updated_at`。
+- `error_message`：失败或恢复原因。
+
+合法状态转换：
+
+```text
+PENDING -> RUNNING
+PENDING -> BLOCKED
+RUNNING -> DONE
+RUNNING -> FAILED
+RUNNING -> BLOCKED
+FAILED -> RETRY
+RETRY -> PENDING
+BLOCKED -> PENDING
+BLOCKED -> FAILED
+```
+
+禁止直接 `PENDING -> DONE`。`RUNNING` 超过 30 分钟会被恢复为 `FAILED`，重新入队时按 `FAILED -> RETRY -> PENDING` 增加 `retry_count` 后重新领取。
 
 ## 核心字段
 

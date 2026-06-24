@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import hashlib
 import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, StrictStr, model_validator
+
+from core.task.state import compute_task_run_id
 
 
 STOCK_CODE_RE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
@@ -132,17 +133,11 @@ class StockResearchReport(StrictSchemaModel):
         if self.task_type == "financial" and not has_range:
             raise ValueError("financial research must include a complete valuation range")
 
+        expected_run_id = compute_task_run_id(self.stock_code, self.task_type, self.research_date, self.schema_version)
         if self.run_id is None:
-            seed = "|".join(
-                [
-                    self.source_report_id or "",
-                    self.stock_code,
-                    self.task_type,
-                    self.research_date,
-                    self.title,
-                ]
-            )
-            object.__setattr__(self, "run_id", hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16])
+            object.__setattr__(self, "run_id", expected_run_id)
+        elif self.run_id != expected_run_id:
+            raise ValueError("run_id must equal hash(stock_code + task_type + date + schema_version)")
         return self
 
 
