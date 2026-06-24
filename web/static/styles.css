@@ -277,46 +277,100 @@ tr:last-child td {
 
 .valuation-chart {
   display: grid;
-  gap: 12px;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
 }
 
-.valuation-row {
-  display: grid;
-  grid-template-columns: 120px minmax(180px, 1fr) 190px;
-  gap: 12px;
-  align-items: center;
+.valuation-history-svg {
+  display: block;
+  width: 100%;
+  min-width: 680px;
+  height: auto;
 }
 
-.valuation-track {
-  position: relative;
-  height: 12px;
-  border-radius: 999px;
-  background: #e5e7eb;
+.valuation-grid-line {
+  stroke: #e5e7eb;
+  stroke-width: 1;
 }
 
-.valuation-range,
-.valuation-mid {
-  position: absolute;
-  top: 0;
-  bottom: 0;
+.valuation-axis-line {
+  stroke: #94a3b8;
+  stroke-width: 1.2;
 }
 
-.valuation-range {
-  border-radius: 999px;
-  background: #8ccfc5;
+.valuation-axis-title,
+.valuation-axis-label,
+.valuation-date-label {
+  fill: var(--muted);
+  font-size: 12px;
 }
 
-.valuation-mid {
-  width: 3px;
-  transform: translateX(-50%);
-  border-radius: 3px;
-  background: var(--accent-2);
+.valuation-band {
+  fill: rgba(15, 118, 110, 0.16);
 }
 
-.valuation-date,
-.valuation-label {
+.valuation-boundary-line {
+  fill: none;
+  stroke: rgba(15, 118, 110, 0.35);
+  stroke-dasharray: 4 4;
+  stroke-width: 1.5;
+}
+
+.valuation-mid-line {
+  fill: none;
+  stroke: var(--accent-2);
+  stroke-width: 2.5;
+}
+
+.valuation-whisker {
+  stroke: #0f766e;
+  stroke-width: 2;
+}
+
+.valuation-mid-dot {
+  fill: var(--surface);
+  stroke: var(--accent-2);
+  stroke-width: 2.5;
+}
+
+.valuation-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
   color: var(--muted);
   font-size: 13px;
+}
+
+.valuation-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.valuation-legend i {
+  display: inline-block;
+  width: 18px;
+  height: 10px;
+}
+
+.legend-band {
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.16);
+}
+
+.legend-line {
+  height: 0 !important;
+  border-top: 3px solid var(--accent-2);
+}
+
+.legend-dot {
+  width: 10px !important;
+  border: 2px solid var(--accent-2);
+  border-radius: 999px;
 }
 
 .risk-list {
@@ -346,7 +400,7 @@ tr:last-child td {
     min-width: 0;
   }
 
-  .valuation-row {
-    grid-template-columns: 1fr;
+  .valuation-chart {
+    padding: 8px;
   }
 }

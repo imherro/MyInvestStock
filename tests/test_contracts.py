@@ -15,6 +15,7 @@ from myinveststock.web import (
     leader_to_summary,
     render_layout,
     render_queue_rows,
+    render_valuation_chart,
     research_run_to_summary,
     xueqiu_stock_link,
     xueqiu_url_for_code,
@@ -100,6 +101,52 @@ class ContractTests(unittest.TestCase):
         self.assertIn('href="https://xueqiu.com/S/SH688256"', link)
         self.assertIn('target="_blank"', link)
         self.assertIn('rel="noopener noreferrer"', link)
+
+    def test_valuation_chart_uses_time_price_svg(self) -> None:
+        html = render_valuation_chart(
+            [
+                {
+                    "research_date": "2026-06-22",
+                    "valuation_low": 90,
+                    "valuation_mid": 120,
+                    "valuation_high": 150,
+                    "valuation_method": "PE",
+                    "heavy_position_view": "可跟踪",
+                },
+                {
+                    "research_date": "2026-06-24",
+                    "valuation_low": 100,
+                    "valuation_mid": 130,
+                    "valuation_high": 160,
+                    "valuation_method": "PE+DCF",
+                    "heavy_position_view": "核心仓研究资格",
+                },
+            ]
+        )
+        self.assertIn("<svg", html)
+        self.assertIn("合理估值区间随时间变化图", html)
+        self.assertIn("valuation-band", html)
+        self.assertIn("valuation-mid-line", html)
+        self.assertIn("价格 CNY/share", html)
+        self.assertIn("06-22", html)
+        self.assertIn("06-24", html)
+
+    def test_single_valuation_chart_uses_whisker_without_band(self) -> None:
+        html = render_valuation_chart(
+            [
+                {
+                    "research_date": "2026-06-24",
+                    "valuation_low": 100,
+                    "valuation_mid": 130,
+                    "valuation_high": 160,
+                    "valuation_method": "PE+DCF",
+                    "heavy_position_view": "可跟踪",
+                }
+            ]
+        )
+        self.assertIn("valuation-whisker", html)
+        self.assertIn("valuation-mid-dot", html)
+        self.assertNotIn("valuation-band", html)
 
     def test_index_leader_summary_contract(self) -> None:
         row = {

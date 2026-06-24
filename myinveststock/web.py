@@ -285,31 +285,151 @@ def render_empty_section(title: str) -> str:
     </section>"""
 
 
-def render_valuation_chart(runs: list[object]) -> str:
-    if not runs:
-        return render_empty_section("合理估值区间历史")
-    max_value = max(float(row["valuation_high"]) for row in runs if row["valuation_high"] is not None)
-    rows = []
+def short_date(value: object) -> str:
+    text = str(value or "")
+    if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        return text[5:]
+    return text
+
+
+def _chart_x(index: int, count: int, left: float, width: float) -> float:
+    if count <= 1:
+        return left + width / 2.0
+    return left + width * index / (count - 1)
+
+
+def _chart_y(value: float, lower: float, upper: float, top: float, height: float) -> float:
+    if upper <= lower:
+        return top + height / 2.0
+    return top + (upper - value) / (upper - lower) * height
+
+
+def _valuation_chart_points(runs: list[object]) -> list[dict[str, object]]:
+    points: list[dict[str, object]] = []
     for row in runs:
-        low = float(row["valuation_low"])
-        mid = float(row["valuation_mid"])
-        high = float(row["valuation_high"])
-        left = max(0.0, min(100.0, low / max_value * 100))
-        width = max(2.0, min(100.0 - left, (high - low) / max_value * 100))
-        mid_pos = max(0.0, min(100.0, mid / max_value * 100))
-        rows.append(
-            f"""<div class="valuation-row">
-        <div class="valuation-date">{esc(row['research_date'])}</div>
-        <div class="valuation-track">
-          <span class="valuation-range" style="left:{left:.2f}%;width:{width:.2f}%"></span>
-          <span class="valuation-mid" style="left:{mid_pos:.2f}%"></span>
-        </div>
-        <div class="valuation-label">{fmt_num(low)} / {fmt_num(mid)} / {fmt_num(high)}</div>
-      </div>"""
+        try:
+            low = float(row["valuation_low"])
+            mid = float(row["valuation_mid"])
+            high = float(row["valuation_high"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if high < low:
+            low, high = high, low
+        points.append(
+            {
+                "date": str(row["research_date"]),
+                "low": low,
+                "mid": mid,
+                "high": high,
+                "method": row["valuation_method"] or "待入库",
+                "grade": row["heavy_position_view"] or "待入库",
+            }
         )
+    return points
+
+
+def render_valuation_chart(runs: list[object]) -> str:
+    points = _valuation_chart_points(runs)
+    if not points:
+        return render_empty_section("合理估值区间历史")
+
+    width = 760.0
+    height = 320.0
+    left = 64.0
+    right = 24.0
+    top = 28.0
+    bottom = 52.0
+    plot_width = width - left - right
+    plot_height = height - top - bottom
+    lows = [float(item["low"]) for item in points]
+    highs = [float(item["high"]) for item in points]
+    lower = min(lows)
+    upper = max(highs)
+    span = upper - lower
+    pad = max(span * 0.08, max(abs(upper), 1.0) * 0.02, 1.0)
+    y_min = lower - pad
+    y_max = upper + pad
+
+    positioned = []
+    count = len(points)
+    for index, point in enumerate(points):
+        x = _chart_x(index, count, left, plot_width)
+        positioned.append(
+            {
+                **point,
+                "x": x,
+                "y_low": _chart_y(float(point["low"]), y_min, y_max, top, plot_height),
+                "y_mid": _chart_y(float(point["mid"]), y_min, y_max, top, plot_height),
+                "y_high": _chart_y(float(point["high"]), y_min, y_max, top, plot_height),
+            }
+        )
+
+    tick_lines = []
+    for index in range(5):
+        value = y_max - (y_max - y_min) * index / 4.0
+        y = _chart_y(value, y_min, y_max, top, plot_height)
+        tick_lines.append(
+            f"""<g>
+          <line class="valuation-grid-line" x1="{left:.1f}" y1="{y:.1f}" x2="{width - right:.1f}" y2="{y:.1f}"></line>
+          <text class="valuation-axis-label" x="{left - 10:.1f}" y="{y + 4:.1f}" text-anchor="end">{fmt_num(value)}</text>
+        </g>"""
+        )
+
+    if count > 1:
+        upper_points = " ".join(f"{item['x']:.1f},{item['y_high']:.1f}" for item in positioned)
+        lower_points = " ".join(f"{item['x']:.1f},{item['y_low']:.1f}" for item in reversed(positioned))
+        band_svg = f"""<polygon class="valuation-band" points="{upper_points} {lower_points}"></polygon>"""
+        high_line = f"""<polyline class="valuation-boundary-line" points="{upper_points}"></polyline>"""
+        low_line = f"""<polyline class="valuation-boundary-line" points="{" ".join(f"{item['x']:.1f},{item['y_low']:.1f}" for item in positioned)}"></polyline>"""
+        mid_line = f"""<polyline class="valuation-mid-line" points="{" ".join(f"{item['x']:.1f},{item['y_mid']:.1f}" for item in positioned)}"></polyline>"""
+    else:
+        band_svg = ""
+        high_line = ""
+        low_line = ""
+        mid_line = ""
+
+    label_step = max(1, (count + 5) // 6)
+    x_labels = []
+    markers = []
+    for index, item in enumerate(positioned):
+        if index % label_step == 0 or index == count - 1:
+            x_labels.append(
+                f"""<text class="valuation-date-label" x="{item['x']:.1f}" y="{height - 18:.1f}" text-anchor="middle">{esc(short_date(item['date']))}</text>"""
+            )
+        tooltip = (
+            f"{item['date']} | 保守 {fmt_num(item['low'])} | 合理 {fmt_num(item['mid'])} | "
+            f"乐观 {fmt_num(item['high'])} | {item['method']} | {item['grade']}"
+        )
+        markers.append(
+            f"""<g class="valuation-point">
+          <title>{esc(tooltip)}</title>
+          <line class="valuation-whisker" x1="{item['x']:.1f}" y1="{item['y_high']:.1f}" x2="{item['x']:.1f}" y2="{item['y_low']:.1f}"></line>
+          <circle class="valuation-mid-dot" cx="{item['x']:.1f}" cy="{item['y_mid']:.1f}" r="4.5"></circle>
+        </g>"""
+        )
+
     return f"""<section class="section-block">
       <h2>合理估值区间历史</h2>
-      <div class="valuation-chart">{''.join(rows)}</div>
+      <div class="valuation-chart">
+        <svg class="valuation-history-svg" viewBox="0 0 {width:.0f} {height:.0f}" role="img" aria-label="合理估值区间随时间变化图">
+          <title>合理估值区间随时间变化图</title>
+          <line class="valuation-axis-line" x1="{left:.1f}" y1="{top:.1f}" x2="{left:.1f}" y2="{height - bottom:.1f}"></line>
+          <line class="valuation-axis-line" x1="{left:.1f}" y1="{height - bottom:.1f}" x2="{width - right:.1f}" y2="{height - bottom:.1f}"></line>
+          <text class="valuation-axis-title" x="{left:.1f}" y="16" text-anchor="start">价格 CNY/share</text>
+          {''.join(tick_lines)}
+          {band_svg}
+          {high_line}
+          {low_line}
+          {mid_line}
+          {''.join(markers)}
+          {''.join(x_labels)}
+        </svg>
+        <div class="valuation-legend">
+          <span><i class="legend-band"></i>保守-乐观区间</span>
+          <span><i class="legend-line"></i>合理估值中枢</span>
+          <span><i class="legend-dot"></i>单次财务深研</span>
+        </div>
+      </div>
     </section>"""
 
 
