@@ -5,6 +5,7 @@ import json
 import mimetypes
 import re
 from contextlib import closing
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,6 +16,7 @@ from .db import (
     connect,
     get_latest_leader,
     latest_report,
+    list_daily_prices,
     list_latest_leaders,
     list_queue,
     list_research_runs,
@@ -328,8 +330,55 @@ def _valuation_chart_points(runs: list[object]) -> list[dict[str, object]]:
     return points
 
 
-def render_valuation_chart(runs: list[object]) -> str:
-    points = _valuation_chart_points(runs)
+def _row_value(row: object, key: str) -> object:
+    try:
+        return row[key]  # type: ignore[index]
+    except (KeyError, IndexError, TypeError):
+        if isinstance(row, dict):
+            return row.get(key)
+        return None
+
+
+def _daily_price_points(prices: list[object]) -> list[dict[str, object]]:
+    points: list[dict[str, object]] = []
+    for row in prices:
+        try:
+            open_price = float(_row_value(row, "open_price"))
+            high_price = float(_row_value(row, "high_price"))
+            low_price = float(_row_value(row, "low_price"))
+            close_price = float(_row_value(row, "close_price"))
+        except (TypeError, ValueError):
+            continue
+        if high_price < low_price:
+            high_price, low_price = low_price, high_price
+        points.append(
+            {
+                "date": str(_row_value(row, "trade_date")),
+                "open": open_price,
+                "high": high_price,
+                "low": low_price,
+                "close": close_price,
+            }
+        )
+    return points
+
+
+def _parsed_date(value: object) -> object | None:
+    try:
+        return datetime.fromisoformat(str(value)[:10]).date()
+    except ValueError:
+        return None
+
+
+def _valuation_price_start(runs: list[object]) -> str | None:
+    dates = [_parsed_date(_row_value(row, "research_date")) for row in runs]
+    valid_dates = [item for item in dates if item is not None]
+    if not valid_dates:
+        return None
+    return (min(valid_dates) - timedelta(days=45)).isoformat()
+
+
+def _render_plain_valuation_chart(points: list[dict[str, object]]) -> str:
     if not points:
         return render_empty_section("合理估值区间历史")
 
@@ -433,6 +482,184 @@ def render_valuation_chart(runs: list[object]) -> str:
     </section>"""
 
 
+def _price_index_on_or_after(price_dates: list[object], date_value: object) -> int:
+    target = _parsed_date(date_value)
+    if target is None:
+        return 0
+    for index, price_date in enumerate(price_dates):
+        if price_date is not None and price_date >= target:
+            return index
+    return max(len(price_dates) - 1, 0)
+
+
+def _render_kline_valuation_chart(
+    valuation_points: list[dict[str, object]],
+    price_points: list[dict[str, object]],
+) -> str:
+    if len(price_points) < 2:
+        return _render_plain_valuation_chart(valuation_points)
+
+    width = 760.0
+    height = 360.0
+    left = 64.0
+    right = 24.0
+    top = 30.0
+    bottom = 58.0
+    plot_width = width - left - right
+    plot_height = height - top - bottom
+    plot_right = width - right
+    plot_bottom = height - bottom
+
+    price_lows = [float(item["low"]) for item in price_points]
+    price_highs = [float(item["high"]) for item in price_points]
+    valuation_lows = [float(item["low"]) for item in valuation_points]
+    valuation_highs = [float(item["high"]) for item in valuation_points]
+    lower = min(price_lows + valuation_lows)
+    upper = max(price_highs + valuation_highs)
+    span = upper - lower
+    pad = max(span * 0.08, max(abs(upper), 1.0) * 0.02, 1.0)
+    y_min = lower - pad
+    y_max = upper + pad
+
+    price_dates = [_parsed_date(item["date"]) for item in price_points]
+    price_count = len(price_points)
+    spacing = plot_width / (price_count - 1)
+    candle_width = min(max(spacing * 0.58, 2.4), 7.5)
+
+    tick_lines = []
+    for index in range(5):
+        value = y_max - (y_max - y_min) * index / 4.0
+        y = _chart_y(value, y_min, y_max, top, plot_height)
+        tick_lines.append(
+            f"""<g>
+          <line class="valuation-grid-line" x1="{left:.1f}" y1="{y:.1f}" x2="{plot_right:.1f}" y2="{y:.1f}"></line>
+          <text class="valuation-axis-label" x="{left - 10:.1f}" y="{y + 4:.1f}" text-anchor="end">{fmt_num(value)}</text>
+        </g>"""
+        )
+
+    candles = []
+    label_step = max(1, (price_count + 5) // 6)
+    x_labels = []
+    for index, item in enumerate(price_points):
+        x = _chart_x(index, price_count, left, plot_width)
+        y_open = _chart_y(float(item["open"]), y_min, y_max, top, plot_height)
+        y_close = _chart_y(float(item["close"]), y_min, y_max, top, plot_height)
+        y_high = _chart_y(float(item["high"]), y_min, y_max, top, plot_height)
+        y_low = _chart_y(float(item["low"]), y_min, y_max, top, plot_height)
+        body_top = min(y_open, y_close)
+        body_height = max(abs(y_close - y_open), 1.4)
+        trend_class = "kline-up" if float(item["close"]) >= float(item["open"]) else "kline-down"
+        tooltip = (
+            f"{item['date']} | 开 {fmt_num(item['open'])} | 高 {fmt_num(item['high'])} | "
+            f"低 {fmt_num(item['low'])} | 收 {fmt_num(item['close'])}"
+        )
+        candles.append(
+            f"""<g class="kline-candle {trend_class}">
+          <title>{esc(tooltip)}</title>
+          <line class="kline-wick" x1="{x:.1f}" y1="{y_high:.1f}" x2="{x:.1f}" y2="{y_low:.1f}"></line>
+          <rect class="kline-body" x="{x - candle_width / 2:.1f}" y="{body_top:.1f}" width="{candle_width:.1f}" height="{body_height:.1f}"></rect>
+        </g>"""
+        )
+        if index % label_step == 0 or index == price_count - 1:
+            x_labels.append(
+                f"""<text class="valuation-date-label" x="{x:.1f}" y="{height - 18:.1f}" text-anchor="middle">{esc(short_date(item['date']))}</text>"""
+            )
+
+    positioned_valuations = []
+    for point in valuation_points:
+        price_index = _price_index_on_or_after(price_dates, point["date"])
+        x = _chart_x(price_index, price_count, left, plot_width)
+        positioned_valuations.append(
+            {
+                **point,
+                "price_index": price_index,
+                "x": x,
+                "y_low": _chart_y(float(point["low"]), y_min, y_max, top, plot_height),
+                "y_mid": _chart_y(float(point["mid"]), y_min, y_max, top, plot_height),
+                "y_high": _chart_y(float(point["high"]), y_min, y_max, top, plot_height),
+            }
+        )
+
+    bands = []
+    boundary_lines = []
+    mid_lines = []
+    markers = []
+    for index, item in enumerate(positioned_valuations):
+        start_x = float(item["x"])
+        if index + 1 < len(positioned_valuations):
+            end_x = float(positioned_valuations[index + 1]["x"])
+            if end_x <= start_x:
+                end_x = min(plot_right, start_x + spacing)
+        else:
+            end_x = plot_right
+        width_value = max(end_x - start_x, 2.0)
+        band_y = float(item["y_high"])
+        band_height = max(float(item["y_low"]) - band_y, 1.0)
+        tooltip = (
+            f"{item['date']} 起 | 保守 {fmt_num(item['low'])} | 合理 {fmt_num(item['mid'])} | "
+            f"乐观 {fmt_num(item['high'])} | {item['method']} | {item['grade']}"
+        )
+        bands.append(
+            f"""<rect class="valuation-step-band" x="{start_x:.1f}" y="{band_y:.1f}" width="{width_value:.1f}" height="{band_height:.1f}">
+          <title>{esc(tooltip)}</title>
+        </rect>"""
+        )
+        boundary_lines.append(
+            f"""<line class="valuation-step-boundary-line" x1="{start_x:.1f}" y1="{item['y_high']:.1f}" x2="{end_x:.1f}" y2="{item['y_high']:.1f}"></line>
+          <line class="valuation-step-boundary-line" x1="{start_x:.1f}" y1="{item['y_low']:.1f}" x2="{end_x:.1f}" y2="{item['y_low']:.1f}"></line>"""
+        )
+        mid_lines.append(
+            f"""<line class="valuation-mid-line" x1="{start_x:.1f}" y1="{item['y_mid']:.1f}" x2="{end_x:.1f}" y2="{item['y_mid']:.1f}"></line>"""
+        )
+        markers.append(
+            f"""<g class="valuation-point">
+          <title>{esc(tooltip)}</title>
+          <line class="valuation-whisker" x1="{start_x:.1f}" y1="{item['y_high']:.1f}" x2="{start_x:.1f}" y2="{item['y_low']:.1f}"></line>
+          <circle class="valuation-mid-dot" cx="{start_x:.1f}" cy="{item['y_mid']:.1f}" r="4.5"></circle>
+        </g>"""
+        )
+
+    first_date = price_points[0]["date"]
+    last_date = price_points[-1]["date"]
+    return f"""<section class="section-block">
+      <h2>合理估值区间历史</h2>
+      <div class="valuation-chart">
+        <svg class="valuation-history-svg" viewBox="0 0 {width:.0f} {height:.0f}" role="img" aria-label="K线叠加合理估值区间图">
+          <title>K线叠加合理估值区间图</title>
+          <line class="valuation-axis-line" x1="{left:.1f}" y1="{top:.1f}" x2="{left:.1f}" y2="{plot_bottom:.1f}"></line>
+          <line class="valuation-axis-line" x1="{left:.1f}" y1="{plot_bottom:.1f}" x2="{plot_right:.1f}" y2="{plot_bottom:.1f}"></line>
+          <text class="valuation-axis-title" x="{left:.1f}" y="16" text-anchor="start">价格 CNY/share</text>
+          <text class="valuation-range-label" x="{plot_right:.1f}" y="16" text-anchor="end">{esc(short_date(first_date))} - {esc(short_date(last_date))}</text>
+          {''.join(tick_lines)}
+          <g class="kline-layer">{''.join(candles)}</g>
+          <g class="valuation-overlay-layer">
+            {''.join(bands)}
+            {''.join(boundary_lines)}
+            {''.join(mid_lines)}
+            {''.join(markers)}
+          </g>
+          {''.join(x_labels)}
+        </svg>
+        <div class="valuation-legend">
+          <span><i class="legend-kline"></i>近期K线</span>
+          <span><i class="legend-band"></i>保守-乐观区间</span>
+          <span><i class="legend-line"></i>合理估值中枢</span>
+          <span><i class="legend-dot"></i>财务深研刷新点</span>
+        </div>
+      </div>
+    </section>"""
+
+
+def render_valuation_chart(runs: list[object], prices: list[object] | None = None) -> str:
+    points = _valuation_chart_points(runs)
+    if not points:
+        return render_empty_section("合理估值区间历史")
+    price_points = _daily_price_points(prices or [])
+    if price_points:
+        return _render_kline_valuation_chart(points, price_points)
+    return _render_plain_valuation_chart(points)
+
+
 def render_stock_page(code: str) -> bytes:
     if not STOCK_CODE_RE.match(code):
         return render_layout("无效代码", "<section class=\"content\"><h1>无效股票代码</h1></section>")
@@ -440,6 +667,8 @@ def render_stock_page(code: str) -> bytes:
         leader = get_latest_leader(conn, code)
         runs = list_research_runs(conn, code)
         chart_runs = valuation_runs(conn, code)
+        price_start = _valuation_price_start(chart_runs)
+        chart_prices = list_daily_prices(conn, code, start_date=price_start, limit=260) if price_start else []
         report = latest_report(conn)
     if leader is None:
         return render_layout("未找到", f"<section class=\"content\"><h1>未找到 {esc(code)}</h1></section>")
@@ -492,7 +721,7 @@ def render_stock_page(code: str) -> bytes:
       </div>
     </section>
     <section class="content">
-      {render_valuation_chart(chart_runs)}
+      {render_valuation_chart(chart_runs, chart_prices)}
       <section class="two-col">
         <div class="section-block">
           <h2>行业地位</h2>

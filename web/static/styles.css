@@ -304,18 +304,54 @@ tr:last-child td {
 
 .valuation-axis-title,
 .valuation-axis-label,
-.valuation-date-label {
+.valuation-date-label,
+.valuation-range-label {
   fill: var(--muted);
   font-size: 12px;
+}
+
+.kline-layer {
+  opacity: 0.72;
+}
+
+.kline-wick {
+  stroke-width: 1.1;
+}
+
+.kline-body {
+  stroke-width: 1;
+}
+
+.kline-up .kline-wick,
+.kline-up .kline-body {
+  fill: rgba(220, 38, 38, 0.38);
+  stroke: rgba(185, 28, 28, 0.72);
+}
+
+.kline-down .kline-wick,
+.kline-down .kline-body {
+  fill: rgba(22, 163, 74, 0.34);
+  stroke: rgba(21, 128, 61, 0.72);
 }
 
 .valuation-band {
   fill: rgba(15, 118, 110, 0.16);
 }
 
+.valuation-step-band {
+  fill: rgba(15, 118, 110, 0.18);
+  stroke: rgba(15, 118, 110, 0.08);
+}
+
 .valuation-boundary-line {
   fill: none;
   stroke: rgba(15, 118, 110, 0.35);
+  stroke-dasharray: 4 4;
+  stroke-width: 1.5;
+}
+
+.valuation-step-boundary-line {
+  stroke: rgba(15, 118, 110, 0.42);
   stroke-dasharray: 4 4;
   stroke-width: 1.5;
 }
@@ -355,6 +391,11 @@ tr:last-child td {
   display: inline-block;
   width: 18px;
   height: 10px;
+}
+
+.legend-kline {
+  background: linear-gradient(90deg, rgba(220, 38, 38, 0.55) 0 45%, transparent 45% 55%, rgba(22, 163, 74, 0.55) 55%);
+  border: 1px solid rgba(100, 116, 139, 0.24);
 }
 
 .legend-band {

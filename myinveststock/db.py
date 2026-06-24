@@ -172,6 +172,21 @@ def init_db(db_path: Path | str = DB_PATH) -> None:
                 raw_json TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS stock_daily_prices (
+                code TEXT NOT NULL,
+                trade_date TEXT NOT NULL,
+                open_price REAL NOT NULL,
+                high_price REAL NOT NULL,
+                low_price REAL NOT NULL,
+                close_price REAL NOT NULL,
+                volume REAL,
+                amount REAL,
+                adj TEXT,
+                source TEXT NOT NULL,
+                fetched_at TEXT NOT NULL,
+                PRIMARY KEY (code, trade_date)
+            );
+
             CREATE TABLE IF NOT EXISTS task_queue (
                 task_id TEXT PRIMARY KEY,
                 run_id TEXT NOT NULL UNIQUE,
@@ -203,6 +218,8 @@ def init_db(db_path: Path | str = DB_PATH) -> None:
                 ON audit_log(run_id, stage);
             CREATE INDEX IF NOT EXISTS idx_runs_code_date
                 ON stock_research_runs(code, research_date);
+            CREATE INDEX IF NOT EXISTS idx_daily_prices_code_date
+                ON stock_daily_prices(code, trade_date);
             """
         )
         _create_research_queue_projection(conn)
@@ -224,6 +241,133 @@ def init_db(db_path: Path | str = DB_PATH) -> None:
 
 def _json(value: Any) -> str:
     return json.dumps(value if value is not None else [], ensure_ascii=False, sort_keys=True)
+
+
+def normalize_trade_date(value: object) -> str:
+    text = str(value or "").strip()
+    if len(text) == 8 and text.isdigit():
+        return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+    return datetime.fromisoformat(text[:10]).date().isoformat()
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number:
+        return None
+    return number
+
+
+def _required_float(value: object, field_name: str) -> float:
+    number = _optional_float(value)
+    if number is None:
+        raise ValueError(f"missing numeric daily price field: {field_name}")
+    return number
+
+
+def upsert_daily_prices(
+    conn: sqlite3.Connection,
+    *,
+    code: str,
+    rows: Iterable[dict[str, Any]],
+    source: str,
+    adj: str | None = None,
+    fetched_at: str | None = None,
+) -> int:
+    now = fetched_at or utc_now()
+    written = 0
+    for row in rows:
+        trade_date = normalize_trade_date(row.get("trade_date"))
+        values = (
+            code,
+            trade_date,
+            _required_float(row.get("open"), "open"),
+            _required_float(row.get("high"), "high"),
+            _required_float(row.get("low"), "low"),
+            _required_float(row.get("close"), "close"),
+            _optional_float(row.get("vol") if "vol" in row else row.get("volume")),
+            _optional_float(row.get("amount")),
+            adj,
+            source,
+            now,
+        )
+        conn.execute(
+            """
+            INSERT INTO stock_daily_prices (
+                code, trade_date, open_price, high_price, low_price, close_price,
+                volume, amount, adj, source, fetched_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(code, trade_date) DO UPDATE SET
+                open_price=excluded.open_price,
+                high_price=excluded.high_price,
+                low_price=excluded.low_price,
+                close_price=excluded.close_price,
+                volume=excluded.volume,
+                amount=excluded.amount,
+                adj=excluded.adj,
+                source=excluded.source,
+                fetched_at=excluded.fetched_at
+            """,
+            values,
+        )
+        written += 1
+    return written
+
+
+def list_daily_prices(
+    conn: sqlite3.Connection,
+    code: str,
+    *,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    limit: int | None = None,
+) -> list[sqlite3.Row]:
+    clauses = ["code = ?"]
+    params: list[Any] = [code]
+    if start_date:
+        clauses.append("trade_date >= ?")
+        params.append(normalize_trade_date(start_date))
+    if end_date:
+        clauses.append("trade_date <= ?")
+        params.append(normalize_trade_date(end_date))
+    where = " AND ".join(clauses)
+    columns = """
+        code, trade_date, open_price, high_price, low_price, close_price,
+        volume, amount, adj, source, fetched_at
+    """
+    if limit is not None:
+        return list(
+            conn.execute(
+                f"""
+                SELECT *
+                FROM (
+                    SELECT {columns}
+                    FROM stock_daily_prices
+                    WHERE {where}
+                    ORDER BY trade_date DESC
+                    LIMIT ?
+                )
+                ORDER BY trade_date ASC
+                """,
+                (*params, int(limit)),
+            )
+        )
+    return list(
+        conn.execute(
+            f"""
+            SELECT {columns}
+            FROM stock_daily_prices
+            WHERE {where}
+            ORDER BY trade_date ASC
+            """,
+            params,
+        )
+    )
 
 
 def task_status_to_queue_status(status: TaskStatus) -> str:

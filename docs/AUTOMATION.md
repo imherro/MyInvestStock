@@ -31,6 +31,8 @@
 
 运行 python scripts/ingest_index.py 更新本地 SQLite 队列。只做入队和状态汇总，不领取 research_queue 任务，不生成个股深研正文，不调用个股战略或财务深研提示词。
 
+随后运行 python scripts/update_stock_prices.py --tracked 刷新当前 A可跟踪龙头的近期 K 线缓存。K 线只用于个股页“合理估值区间历史”的价格参照层，不参与估值计算，不改变研究结论。
+
 完成后验证 http://127.0.0.1:8016/api/index 和 http://127.0.0.1:8016/api/latest，汇报 report_id、basis_date、入库股票数量、股票代码和名称，以及生成或保持的 strategic / financial 队列数量。不要输出 .env 内容，不要提交 .env、data/local/*.sqlite、data/raw/*.json。
 ```
 
@@ -70,6 +72,7 @@
 
 数据原则：
 - Tushare 是 A 股结构化主源，使用本地 .env，但不要输出任何 token。
+- 个股页 K 线缓存由 `python scripts/update_stock_prices.py --tracked` 或 `--code {code}` 刷新，只作为价格参照层。
 - 网络资料只作为补充证据，必须记录来源、日期和用途。
 - 不输出交易指令，不输出现金金额，不输出股数。
 - “重仓资格”只能是研究标签，例如 不具备、观察、可跟踪、核心仓研究资格、高估暂缓。

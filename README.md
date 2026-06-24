@@ -44,6 +44,7 @@ SQLite:
   task_queue
   research_queue
   stock_research_runs
+  stock_daily_prices
   audit_log
         |
         +--> scripts/generate_single_stock_prompt.py
@@ -74,6 +75,22 @@ myinveststock/web.py
 - `signal.py`：输出 `undervalued_score`、`growth_score`、`quality_score`、`risk_adjusted_score`。
 
 `StockResearchReport.valuation` 可以承接 `engine_version` 和四个 signal 分数，保证估值数值不由 prompt 临场生成。
+
+## K线叠加估值区间
+
+个股页的“合理估值区间历史”优先显示近期 K 线叠加估值区间图。
+
+- K 线数据来自本地 SQLite `stock_daily_prices`，通过 `scripts/update_stock_prices.py` 从 Tushare `pro_bar` 刷新。
+- 页面只读本地缓存，不在用户访问页面时联网，也不读取 `.env`。
+- K 线默认使用前复权 `qfq` 口径，作为价格参照层，不参与估值计算。
+- 合理估值区间仍由确定性估值引擎和报告 assembler 生成。
+- 如果某只股票还没有 K 线缓存，页面自动降级为纯估值历史图。
+
+刷新当前 A 可跟踪龙头的近期 K 线：
+
+```powershell
+python scripts/update_stock_prices.py --tracked
+```
 
 ## 确定性报告组装
 
@@ -202,6 +219,12 @@ python -m pip install -r requirements.txt
 
 ```powershell
 python scripts/ingest_index.py
+```
+
+刷新 K 线缓存：
+
+```powershell
+python scripts/update_stock_prices.py --tracked
 ```
 
 启动 Web：

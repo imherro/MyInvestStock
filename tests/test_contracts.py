@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from contextlib import closing
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
+from myinveststock.db import connect, init_db, list_daily_prices, upsert_daily_prices
 from myinveststock.leader_index import (
     build_financial_prompt,
     build_report_explainer_prompt,
@@ -131,6 +135,55 @@ class ContractTests(unittest.TestCase):
         self.assertIn("06-22", html)
         self.assertIn("06-24", html)
 
+    def test_valuation_chart_uses_kline_overlay_when_prices_exist(self) -> None:
+        runs = [
+            {
+                "research_date": "2026-06-22",
+                "valuation_low": 90,
+                "valuation_mid": 120,
+                "valuation_high": 150,
+                "valuation_method": "PE",
+                "heavy_position_view": "可跟踪",
+            },
+            {
+                "research_date": "2026-06-24",
+                "valuation_low": 100,
+                "valuation_mid": 130,
+                "valuation_high": 160,
+                "valuation_method": "PE+DCF",
+                "heavy_position_view": "核心仓研究资格",
+            },
+        ]
+        prices = [
+            {
+                "trade_date": "2026-06-21",
+                "open_price": 105,
+                "high_price": 108,
+                "low_price": 101,
+                "close_price": 107,
+            },
+            {
+                "trade_date": "2026-06-22",
+                "open_price": 107,
+                "high_price": 111,
+                "low_price": 106,
+                "close_price": 109,
+            },
+            {
+                "trade_date": "2026-06-24",
+                "open_price": 110,
+                "high_price": 116,
+                "low_price": 109,
+                "close_price": 112,
+            },
+        ]
+        html = render_valuation_chart(runs, prices)
+        self.assertIn("K线叠加合理估值区间图", html)
+        self.assertIn("kline-layer", html)
+        self.assertIn("valuation-step-band", html)
+        self.assertIn("legend-kline", html)
+        self.assertIn("财务深研刷新点", html)
+
     def test_single_valuation_chart_uses_whisker_without_band(self) -> None:
         html = render_valuation_chart(
             [
@@ -147,6 +200,41 @@ class ContractTests(unittest.TestCase):
         self.assertIn("valuation-whisker", html)
         self.assertIn("valuation-mid-dot", html)
         self.assertNotIn("valuation-band", html)
+
+    def test_daily_price_cache_roundtrip(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "prices.sqlite"
+            init_db(db_path)
+            with closing(connect(db_path)) as conn:
+                count = upsert_daily_prices(
+                    conn,
+                    code="600519.SH",
+                    rows=[
+                        {
+                            "trade_date": "20260621",
+                            "open": 1500,
+                            "high": 1520,
+                            "low": 1490,
+                            "close": 1510,
+                            "vol": 100,
+                            "amount": 200,
+                        },
+                        {
+                            "trade_date": "2026-06-22",
+                            "open": 1510,
+                            "high": 1530,
+                            "low": 1500,
+                            "close": 1525,
+                        },
+                    ],
+                    source="unit-test",
+                    adj="qfq",
+                )
+                conn.commit()
+                rows = list_daily_prices(conn, "600519.SH", limit=5)
+            self.assertEqual(count, 2)
+            self.assertEqual([row["trade_date"] for row in rows], ["2026-06-21", "2026-06-22"])
+            self.assertEqual(rows[0]["adj"], "qfq")
 
     def test_index_leader_summary_contract(self) -> None:
         row = {
