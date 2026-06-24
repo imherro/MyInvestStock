@@ -75,6 +75,12 @@ BLOCKED -> FAILED
 - `DONE` -> `complete`
 - `FAILED` / `BLOCKED` -> `blocked`
 
+`research_queue` 可以包含展示来源字段，但这些字段不参与状态机：
+
+- `source_type='trackable_leader'`：来自上游 `/api/index` 的 `A可跟踪龙头`。
+- `source_type='manual_request'`：来自 `/research?stock={code}` 的主动研究请求。
+- `/api/queue` 会额外输出 `source_label`：`可跟踪龙头` 或 `其他请求`。
+
 ## 审计日志
 
 `audit_log` 是旁路审计表，不参与任务领取、状态转换或报告计算。

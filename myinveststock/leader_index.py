@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 import re
 import urllib.request
+from contextlib import closing
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from .config import DB_PATH, LEADER_INDEX_URL, RAW_DATA_DIR
 from .db import (
+    QUEUE_SOURCE_REQUEST,
     connect,
     has_strategic_work,
     init_db,
@@ -217,6 +220,72 @@ def build_financial_prompt(item: dict[str, Any], report: dict[str, Any]) -> str:
 完成后保证 /stocks/{code} 能看到由 deterministic pipeline 生成并入库的估值区间历史叠加。"""
 
 
+def build_requested_strategic_prompt(item: dict[str, Any], report: dict[str, Any]) -> str:
+    code = item["code"]
+    name = item["name"]
+    return f"""在 C:\\Users\\kunpeng\\Documents\\MyInvestStock 中执行个股战略深研。
+
+唯一研究对象：{code} {name}。
+
+入口信息：
+- 入口来源：用户主动请求 /research?stock={code}
+- report_id：{report["report_id"]}
+- basis_date：{report.get("basis_date")}
+- 主题：其他请求
+
+硬约束：
+- 这只股票不要求出现在 /api/index 的 A可跟踪龙头列表里。
+- 只研究这一只股票，禁止同时研究其他股票。
+- Tushare 是 A 股结构化主源，网络资料只作补充证据。
+- 本任务只做战略、行业、竞争和长期潜力研究，不给最终估值区间。
+- 不输出交易指令、不输出现金金额、不输出股数。
+
+必须覆盖：
+- 行业位置：公司所处细分赛道、产业链环节、国内/全球地位。
+- 市场空间：当前空间、未来 3-5 年扩容逻辑、政策或技术驱动。
+- 竞争格局：直接竞争者、替代者、潜在进入者、行业集中度变化。
+- 上下游公司：关键供应商、客户、平台、渠道和议价关系。
+- 战略壁垒：技术、品牌、渠道、成本、客户锁定、牌照或生态。
+- 五倍/十倍潜力：只判断战略条件，不用股价目标代替逻辑。
+- 战略证伪条件：什么行业或竞争数据出现后说明长期逻辑错了。
+
+完成后输出结构化 JSON，并通过 `scripts/import_research_run.py` 入库为 task_type='strategic'。
+战略 JSON 不允许写估值区间字段。
+{STOCK_REPORT_SCHEMA_INSTRUCTION}
+JSON 必须符合 StockResearchReport：`task_type` 为 `strategic`，`valuation.intrinsic_value_low/mid/high` 均为 `null`，禁止额外字段。"""
+
+
+def build_requested_financial_prompt(item: dict[str, Any], report: dict[str, Any]) -> str:
+    code = item["code"]
+    name = item["name"]
+    return f"""在 C:\\Users\\kunpeng\\Documents\\MyInvestStock 中执行个股财务估值深研输入构建。
+
+唯一研究对象：{code} {name}。
+
+入口信息：
+- 入口来源：用户主动请求 /research?stock={code}
+- report_id：{report["report_id"]}
+- basis_date：{report.get("basis_date")}
+- 主题：其他请求
+
+前置依赖：
+- 先读取本地 stock_research_runs 中 {code} 的 task_type='strategic' 最新记录。
+- 如果战略深研不存在，先停止并把本任务标记为 blocked，不要跳过前置依赖。
+
+硬约束：
+- 这只股票不要求出现在 /api/index 的 A可跟踪龙头列表里。
+- 只研究这一只股票，禁止同时研究其他股票。
+- Tushare 是 A 股财务、行情、估值结构化主源。
+- 网络资料只用于补充财务口径、行业数据或管理层表述。
+- 本任务可以多次重复执行，用最新财务、估值和价格数据刷新结论。
+- 本任务只构建 deterministic report 所需的 assembly_input，不直接生成最终 StockResearchReport。
+- 不输出交易指令、不输出现金金额、不输出股数。
+
+{FINANCIAL_ASSEMBLY_INPUT_INSTRUCTION}
+
+完成后保证 /stocks/{code} 能看到由 deterministic pipeline 生成并入库的估值区间历史叠加。"""
+
+
 def build_report_explainer_prompt(report_output: dict[str, Any] | str) -> str:
     report_text = (
         report_output
@@ -228,6 +297,86 @@ def build_report_explainer_prompt(report_output: dict[str, Any] | str) -> str:
 StockResearchReport:
 {report_text}
 """
+
+
+def enqueue_requested_stock(
+    code: str,
+    *,
+    name: str | None = None,
+    db_path: Path | str | None = None,
+) -> dict[str, Any]:
+    stock_code = code.strip().upper()
+    if not STOCK_CODE_RE.match(stock_code):
+        raise ValueError(f"invalid stock code: {code}")
+    stock_name = (name or stock_code).strip() or stock_code
+    basis_date = datetime.now().date().isoformat()
+    report = {
+        "report_id": f"manual_research_request_{basis_date}",
+        "schema_version": "manual_research_request.v1",
+        "generated_at": datetime.now().replace(microsecond=0).isoformat(),
+        "basis_date": basis_date,
+        "theme_report_id": None,
+    }
+    item = {"code": stock_code, "name": stock_name, "theme": "其他请求"}
+    now = utc_now()
+    db_target = Path(db_path) if db_path is not None else DB_PATH
+    init_db(db_target)
+    queued: list[str] = []
+    with closing(connect(db_target)) as conn:
+        upsert_report(
+            conn,
+            report_id=report["report_id"],
+            schema_version=report["schema_version"],
+            generated_at=report["generated_at"],
+            basis_date=report["basis_date"],
+            theme_report_id=None,
+            source_url=f"/research?stock={stock_code}",
+            fetched_at=now,
+            raw_path=None,
+        )
+        if not has_strategic_work(conn, stock_code):
+            upsert_queue_item(
+                conn,
+                report_id=report["report_id"],
+                code=stock_code,
+                name=stock_name,
+                priority=900,
+                stage=1,
+                task_type="strategic",
+                task_keyword=f"MyInvestStock 个股战略深研 {stock_code} {stock_name}",
+                prompt=build_requested_strategic_prompt(item, report),
+                depends_on_task_type=None,
+                task_date=basis_date,
+                now=now,
+                source_type=QUEUE_SOURCE_REQUEST,
+                source_detail="/research",
+            )
+            queued.append("strategic")
+        upsert_queue_item(
+            conn,
+            report_id=report["report_id"],
+            code=stock_code,
+            name=stock_name,
+            priority=900,
+            stage=2,
+            task_type="financial",
+            task_keyword=f"MyInvestStock 个股财务估值深研 {stock_code} {stock_name}",
+            prompt=build_requested_financial_prompt(item, report),
+            depends_on_task_type="strategic",
+            task_date=basis_date,
+            now=now,
+            source_type=QUEUE_SOURCE_REQUEST,
+            source_detail="/research",
+        )
+        queued.append("financial")
+        conn.commit()
+    return {
+        "code": stock_code,
+        "name": stock_name,
+        "report_id": report["report_id"],
+        "basis_date": basis_date,
+        "queued": queued,
+    }
 
 
 def ingest_payload(
@@ -242,7 +391,7 @@ def ingest_payload(
     report = report_meta(payload)
     items = primary_items(payload)
     now = utc_now()
-    with connect(db_target) as conn:
+    with closing(connect(db_target)) as conn:
         upsert_report(
             conn,
             report_id=report["report_id"],

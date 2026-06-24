@@ -8,6 +8,7 @@ from pathlib import Path
 
 from core.task.state import TaskStatus, compute_task_run_id, validate_transition
 from myinveststock.db import (
+    QUEUE_SOURCE_TRACKABLE,
     claim_next_queue_item,
     connect,
     init_db,
@@ -95,6 +96,8 @@ class TaskStateTests(unittest.TestCase):
                 ).fetchone()
             self.assertIn("task_id", columns)
             self.assertIn("run_id", columns)
+            self.assertIn("source_type", columns)
+            self.assertIn("source_detail", columns)
             self.assertNotIn("status", columns)
             self.assertIsNotNone(index)
 
@@ -123,6 +126,7 @@ class TaskStateTests(unittest.TestCase):
                 self.assertEqual(task["status"], TaskStatus.RUNNING.value)
                 queue_view = list_queue(conn)
                 self.assertEqual(queue_view[0]["status"], "in_progress")
+                self.assertEqual(queue_view[0]["source_type"], QUEUE_SOURCE_TRACKABLE)
                 self.assertEqual(get_task_status(conn, "600519.SH", "financial")[0]["status"], TaskStatus.RUNNING.value)
 
                 mark_queue_status(

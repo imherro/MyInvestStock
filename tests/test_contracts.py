@@ -5,11 +5,23 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from myinveststock.db import connect, init_db, list_daily_prices, upsert_daily_prices
+from myinveststock.db import (
+    QUEUE_SOURCE_REQUEST,
+    QUEUE_SOURCE_TRACKABLE,
+    connect,
+    init_db,
+    list_daily_prices,
+    list_queue,
+    latest_report,
+    upsert_daily_prices,
+)
 from myinveststock.leader_index import (
+    build_requested_financial_prompt,
+    build_requested_strategic_prompt,
     build_financial_prompt,
     build_report_explainer_prompt,
     build_strategic_prompt,
+    enqueue_requested_stock,
     primary_items,
     report_meta,
 )
@@ -70,6 +82,16 @@ class ContractTests(unittest.TestCase):
         self.assertIn("不得引入新外部数据", prompt)
         self.assertIn('"stock_code": "600519.SH"', prompt)
 
+    def test_requested_stock_prompts_do_not_require_api_index_membership(self) -> None:
+        report = {"report_id": "manual_research_request_2026-06-24", "basis_date": "2026-06-24"}
+        item = {"code": "002594.SZ", "name": "比亚迪"}
+        strategic = build_requested_strategic_prompt(item, report)
+        financial = build_requested_financial_prompt(item, report)
+        self.assertIn("用户主动请求", strategic)
+        self.assertIn("不要求出现在 /api/index", strategic)
+        self.assertIn("不要求出现在 /api/index", financial)
+        self.assertNotIn("key_results.primary_output.items", strategic)
+
     def test_report_id_required(self) -> None:
         with self.assertRaises(ValueError):
             report_meta({"report": {}})
@@ -87,6 +109,7 @@ class ContractTests(unittest.TestCase):
                     "stage": 2,
                     "code": "600519.SH",
                     "name": "贵州茅台",
+                    "source_type": QUEUE_SOURCE_TRACKABLE,
                     "task_type": "financial",
                     "status": "pending",
                     "task_keyword": "MyInvestStock 个股财务估值深研 600519.SH 贵州茅台",
@@ -97,6 +120,19 @@ class ContractTests(unittest.TestCase):
         self.assertIn('href="https://xueqiu.com/S/SH600519"', html)
         self.assertIn('target="_blank"', html)
         self.assertIn(">贵州茅台</a>", html)
+        self.assertIn(">可跟踪龙头</td>", html)
+
+    def test_requested_stock_enqueue_marks_queue_source(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "manual.sqlite"
+            result = enqueue_requested_stock("002594.SZ", name="比亚迪", db_path=db_path)
+            with closing(connect(db_path)) as conn:
+                rows = list_queue(conn)
+                report = latest_report(conn)
+            self.assertEqual(result["queued"], ["strategic", "financial"])
+            self.assertEqual({row["source_type"] for row in rows}, {QUEUE_SOURCE_REQUEST})
+            self.assertEqual([row["task_type"] for row in rows], ["strategic", "financial"])
+            self.assertIsNone(report)
 
     def test_stock_code_links_to_xueqiu_new_window(self) -> None:
         self.assertEqual(xueqiu_url_for_code("603259.SH"), "https://xueqiu.com/S/SH603259")
@@ -260,6 +296,7 @@ class ContractTests(unittest.TestCase):
         summary = leader_to_summary(row)
         self.assertEqual(summary["code"], "603259.SH")
         self.assertEqual(summary["links"]["api"], "/api/stocks/603259.SH")
+        self.assertEqual(summary["links"]["research_gateway"], "/research?stock=603259.SH")
         self.assertEqual(summary["market"]["close"], 106.83)
 
     def test_latest_research_summary_contract(self) -> None:

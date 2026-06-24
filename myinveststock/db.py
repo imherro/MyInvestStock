@@ -13,6 +13,8 @@ from core.task.state import TaskStatus, compute_task_id, compute_task_run_id, va
 from .config import DB_PATH
 
 REPORT_SCHEMA_VERSION = "stock_research_report.v1"
+QUEUE_SOURCE_TRACKABLE = "trackable_leader"
+QUEUE_SOURCE_REQUEST = "manual_request"
 
 
 def utc_now() -> str:
@@ -51,6 +53,8 @@ def _create_research_queue_projection(conn: sqlite3.Connection, table_name: str 
             task_id TEXT,
             run_id TEXT,
             depends_on_task_type TEXT,
+            source_type TEXT NOT NULL DEFAULT 'trackable_leader',
+            source_detail TEXT,
             task_keyword TEXT NOT NULL,
             prompt TEXT NOT NULL,
             created_at TEXT NOT NULL,
@@ -67,6 +71,8 @@ def _migrate_research_queue_projection(conn: sqlite3.Connection) -> None:
     if "status" not in columns:
         _ensure_column(conn, "research_queue", "task_id", "TEXT")
         _ensure_column(conn, "research_queue", "run_id", "TEXT")
+        _ensure_column(conn, "research_queue", "source_type", "TEXT NOT NULL DEFAULT 'trackable_leader'")
+        _ensure_column(conn, "research_queue", "source_detail", "TEXT")
         return
 
     legacy_table = "research_queue_legacy_state"
@@ -85,13 +91,22 @@ def _migrate_research_queue_projection(conn: sqlite3.Connection) -> None:
         "task_id",
         "run_id",
         "depends_on_task_type",
+        "source_type",
+        "source_detail",
         "task_keyword",
         "prompt",
         "created_at",
         "updated_at",
     ]
     legacy_columns = _table_columns(conn, legacy_table)
-    select_exprs = [column if column in legacy_columns else "NULL" for column in target_columns]
+    select_exprs = []
+    for column in target_columns:
+        if column in legacy_columns:
+            select_exprs.append(column)
+        elif column == "source_type":
+            select_exprs.append("'trackable_leader'")
+        else:
+            select_exprs.append("NULL")
     conn.execute(
         f"""
         INSERT INTO research_queue ({", ".join(target_columns)})
@@ -241,6 +256,14 @@ def init_db(db_path: Path | str = DB_PATH) -> None:
 
 def _json(value: Any) -> str:
     return json.dumps(value if value is not None else [], ensure_ascii=False, sort_keys=True)
+
+
+def queue_source_label(source_type: object) -> str:
+    if source_type == QUEUE_SOURCE_TRACKABLE:
+        return "可跟踪龙头"
+    if source_type == QUEUE_SOURCE_REQUEST:
+        return "其他请求"
+    return str(source_type or "未知来源")
 
 
 def normalize_trade_date(value: object) -> str:
@@ -653,6 +676,8 @@ def upsert_queue_item(
     depends_on_task_type: str | None,
     task_date: str | None,
     now: str,
+    source_type: str = QUEUE_SOURCE_TRACKABLE,
+    source_detail: str | None = None,
 ) -> None:
     run_id = compute_task_run_id(code, task_type, task_date or report_id, REPORT_SCHEMA_VERSION)
     task_id = compute_task_id(run_id)
@@ -668,9 +693,9 @@ def upsert_queue_item(
         """
         INSERT INTO research_queue (
             report_id, code, name, priority, stage, task_type, task_id, run_id, depends_on_task_type,
-            task_keyword, prompt, created_at, updated_at
+            source_type, source_detail, task_keyword, prompt, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(report_id, code, task_type) DO UPDATE SET
             name=excluded.name,
             priority=excluded.priority,
@@ -678,6 +703,8 @@ def upsert_queue_item(
             task_id=excluded.task_id,
             run_id=excluded.run_id,
             depends_on_task_type=excluded.depends_on_task_type,
+            source_type=excluded.source_type,
+            source_detail=excluded.source_detail,
             task_keyword=excluded.task_keyword,
             prompt=excluded.prompt,
             updated_at=excluded.updated_at
@@ -692,6 +719,8 @@ def upsert_queue_item(
             task_id,
             run_id,
             depends_on_task_type,
+            source_type,
+            source_detail,
             task_keyword,
             prompt,
             now,
@@ -705,6 +734,7 @@ def latest_report(conn: sqlite3.Connection) -> sqlite3.Row | None:
         """
         SELECT *
         FROM leader_reports
+        WHERE COALESCE(schema_version, '') != 'manual_research_request.v1'
         ORDER BY COALESCE(generated_at, fetched_at) DESC, fetched_at DESC
         LIMIT 1
         """
@@ -740,6 +770,46 @@ def get_latest_leader(conn: sqlite3.Connection, code: str) -> sqlite3.Row | None
         """,
         (report["report_id"], code),
     ).fetchone()
+
+
+def get_known_leader(conn: sqlite3.Connection, code: str) -> sqlite3.Row | None:
+    return conn.execute(
+        """
+        SELECT l.*
+        FROM trackable_leaders l
+        JOIN leader_reports r ON r.report_id = l.report_id
+        WHERE l.code = ?
+        ORDER BY COALESCE(r.basis_date, r.generated_at, r.fetched_at) DESC, r.fetched_at DESC
+        LIMIT 1
+        """,
+        (code,),
+    ).fetchone()
+
+
+def list_trackable_history(conn: sqlite3.Connection, code: str) -> list[sqlite3.Row]:
+    return list(
+        conn.execute(
+            """
+            SELECT
+                l.code,
+                l.name,
+                l.theme,
+                l.deep_rating,
+                l.deep_label,
+                l.deep_score,
+                l.candidate_leader_claim,
+                r.report_id,
+                r.basis_date,
+                r.generated_at,
+                r.fetched_at
+            FROM trackable_leaders l
+            JOIN leader_reports r ON r.report_id = l.report_id
+            WHERE l.code = ?
+            ORDER BY COALESCE(r.basis_date, r.generated_at, r.fetched_at) DESC, r.fetched_at DESC
+            """,
+            (code,),
+        )
+    )
 
 
 def _queue_status_case() -> str:
@@ -781,6 +851,26 @@ def list_queue(conn: sqlite3.Connection, status: str | None = None) -> list[sqli
             ORDER BY q.priority ASC, q.stage ASC, q.id ASC
             """,
             params,
+        )
+    )
+
+
+def list_queue_for_stock(conn: sqlite3.Connection, code: str) -> list[sqlite3.Row]:
+    return list(
+        conn.execute(
+            f"""
+            SELECT
+                q.*,
+                {_queue_status_case()} AS status,
+                t.status AS task_status,
+                t.retry_count AS retry_count,
+                t.error_message AS error_message
+            FROM research_queue q
+            JOIN task_queue t ON t.run_id = q.run_id
+            WHERE q.code = ?
+            ORDER BY q.created_at DESC, q.priority ASC, q.stage ASC, q.id ASC
+            """,
+            (code,),
         )
     )
 

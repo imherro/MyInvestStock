@@ -43,6 +43,7 @@
 规则：
 
 - 只从本地 `research_queue` 领取 pending 任务，不重新扩展股票池。
+- 队列来源可以是 `可跟踪龙头` 或 `/research?stock={code}` 的 `其他请求`，但领取和执行规则完全相同。
 - 领取任务时把状态标记为 `in_progress`，避免高频自动化重复处理同一项。
 - 同时把系统级 `task_queue` 状态从 `PENDING` 切到 `RUNNING`；入库完成后切到 `DONE`。
 - `RUNNING` 超过 30 分钟会恢复为 `FAILED`，重新入队时经 `RETRY` 回到 `PENDING`。

@@ -9,21 +9,26 @@ from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from .config import DB_PATH, DEFAULT_HOST, DEFAULT_PORT, FOOTER_SCRIPT_URL, ROOT, STATIC_ASSET_VERSION
 from .db import (
     connect,
+    get_known_leader,
     get_latest_leader,
     latest_report,
     list_daily_prices,
     list_latest_leaders,
     list_queue,
+    list_queue_for_stock,
     list_research_runs,
+    list_trackable_history,
+    queue_source_label,
     rows_to_dicts,
     valuation_runs,
 )
 from .config import LEADER_INDEX_URL
+from .leader_index import enqueue_requested_stock
 
 STOCK_CODE_RE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
 
@@ -68,6 +73,7 @@ def leader_to_summary(row: object) -> dict[str, object]:
         "data_gaps": load_json(row["data_gaps_json"], []),
         "links": {
             "page": f"/stocks/{row['code']}",
+            "research_gateway": f"/research?stock={row['code']}",
             "api": f"/api/stocks/{row['code']}",
             "xueqiu": row["xueqiu_url"],
         },
@@ -192,11 +198,12 @@ def xueqiu_stock_link(code: object, preferred_url: object | None = None) -> str:
 
 def render_queue_rows(queue: list[object]) -> str:
     if not queue:
-        return '<tr><td colspan="7" class="empty-cell">当前队列为空。</td></tr>'
+        return '<tr><td colspan="8" class="empty-cell">当前队列为空。</td></tr>'
     return "".join(
         f"""<tr>
       <td>{esc(row['priority'])}</td>
       <td>{esc(row['stage'])}</td>
+      <td>{esc(queue_source_label(row['source_type']))}</td>
       <td>{xueqiu_stock_link(row['code'])}</td>
       <td>{stock_page_link(row['code'], row['name'])}</td>
       <td>{esc(row['task_type'])}</td>
@@ -271,7 +278,7 @@ def render_home() -> bytes:
       <h2>个股深研队列</h2>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>优先级</th><th>阶段</th><th>代码</th><th>名称</th><th>类型</th><th>状态</th><th>任务关键词</th></tr></thead>
+          <thead><tr><th>优先级</th><th>阶段</th><th>来源</th><th>代码</th><th>名称</th><th>类型</th><th>状态</th><th>任务关键词</th></tr></thead>
           <tbody>{queue_rows}</tbody>
         </table>
       </div>
@@ -660,27 +667,130 @@ def render_valuation_chart(runs: list[object], prices: list[object] | None = Non
     return _render_plain_valuation_chart(points)
 
 
+def render_stock_queue_status(queue: list[object]) -> str:
+    if not queue:
+        return ""
+    rows = "".join(
+        f"""<tr>
+      <td>{esc(row['task_type'])}</td>
+      <td>{esc(queue_source_label(row['source_type']))}</td>
+      <td>{esc(row['status'])}</td>
+      <td>{esc(row['task_keyword'])}</td>
+      <td>{esc(row['updated_at'])}</td>
+    </tr>"""
+        for row in queue
+    )
+    return f"""<section class="section-block">
+        <h2>研究队列状态</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>类型</th><th>来源</th><th>状态</th><th>任务关键词</th><th>更新时间</th></tr></thead>
+            <tbody>{rows}</tbody>
+          </table>
+        </div>
+      </section>"""
+
+
+def render_trackable_history(rows: list[object]) -> str:
+    if not rows:
+        return """<section class="section-block">
+        <h2>可跟踪龙头历史</h2>
+        <p class="empty">尚未在本地记录中被列为 A可跟踪龙头。</p>
+      </section>"""
+    body = "".join(
+        f"""<tr>
+      <td>{esc(row['basis_date'] or short_date(row['generated_at'] or row['fetched_at']))}</td>
+      <td>{esc(row['deep_rating'] or '')} {esc(row['deep_label'] or '')}</td>
+      <td>{fmt_num(row['deep_score'])}</td>
+      <td>{esc(row['theme'] or '待入库')}</td>
+      <td>{esc(row['candidate_leader_claim'] or '待入库')}</td>
+      <td>{esc(row['report_id'])}</td>
+    </tr>"""
+        for row in rows
+    )
+    return f"""<section class="section-block">
+        <h2>可跟踪龙头历史</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>日期</th><th>评级</th><th>深研分</th><th>主题</th><th>龙头证据</th><th>report_id</th></tr></thead>
+            <tbody>{body}</tbody>
+          </table>
+        </div>
+      </section>"""
+
+
+def _first_queue_name(queue: list[object], code: str) -> str:
+    if queue:
+        return str(queue[0]["name"] or code)
+    return code
+
+
+def _stock_exists(conn: object, code: str) -> tuple[bool, str | None]:
+    leader = get_latest_leader(conn, code) or get_known_leader(conn, code)
+    if leader is not None:
+        return True, str(leader["name"])
+    runs = list_research_runs(conn, code)
+    if runs:
+        return True, str(runs[0]["name"])
+    queue = list_queue_for_stock(conn, code)
+    if queue:
+        return True, str(queue[0]["name"])
+    return False, None
+
+
+def normalize_stock_query(params: dict[str, list[str]]) -> tuple[str | None, str | None]:
+    stock = (params.get("stock") or params.get("code") or [""])[0].strip().upper()
+    name = (params.get("name") or [""])[0].strip()
+    return (stock or None), (name or None)
+
+
 def render_stock_page(code: str) -> bytes:
     if not STOCK_CODE_RE.match(code):
         return render_layout("无效代码", "<section class=\"content\"><h1>无效股票代码</h1></section>")
     with closing(connect(DB_PATH)) as conn:
-        leader = get_latest_leader(conn, code)
+        leader = get_latest_leader(conn, code) or get_known_leader(conn, code)
         runs = list_research_runs(conn, code)
+        stock_queue = list_queue_for_stock(conn, code)
+        trackable_history = list_trackable_history(conn, code)
         chart_runs = valuation_runs(conn, code)
         price_start = _valuation_price_start(chart_runs)
         chart_prices = list_daily_prices(conn, code, start_date=price_start, limit=260) if price_start else []
         report = latest_report(conn)
-    if leader is None:
-        return render_layout("未找到", f"<section class=\"content\"><h1>未找到 {esc(code)}</h1></section>")
+    if leader is None and not runs and not stock_queue:
+        return render_layout(
+            "未找到",
+            f"""<section class="content">
+        <div class="section-block">
+          <h1>未找到 {esc(code)}</h1>
+          <p class="muted">可以通过 <a class="text-link" href="/research?stock={esc(code)}">加入个股深研队列</a> 生成研究页面。</p>
+        </div>
+      </section>""",
+        )
 
-    market = load_json(leader["market_json"], {})
-    scores = load_json(leader["scores_json"], {})
-    risk_flags = load_json(leader["risk_flags_json"], [])
+    market = load_json(leader["market_json"], {}) if leader is not None else {}
+    scores = load_json(leader["scores_json"], {}) if leader is not None else {}
+    risk_flags = load_json(leader["risk_flags_json"], []) if leader is not None else []
     strategic_run = next((dict(row) for row in runs if row["task_type"] == "strategic"), {})
     financial_run = next((dict(row) for row in runs if row["task_type"] == "financial"), {})
     latest = financial_run or strategic_run
     risks = load_json(latest.get("risks_json"), []) if latest else []
     risk_items = "".join(f"<li>{esc(item)}</li>" for item in (risks or risk_flags or []))
+    stock_name = (
+        str(leader["name"])
+        if leader is not None
+        else str((latest or {}).get("name") or _first_queue_name(stock_queue, code))
+    )
+    stock_theme = leader["theme"] if leader is not None else "其他请求"
+    stock_claim = leader["candidate_leader_claim"] if leader is not None else "主动研究请求"
+    xueqiu_url = leader["xueqiu_url"] if leader is not None else None
+    rating_label = (
+        f"{leader['deep_rating'] or ''} {leader['deep_label'] or ''}".strip()
+        if leader is not None
+        else (queue_source_label(stock_queue[0]["source_type"]) if stock_queue else "待研究")
+    )
+    report_date = report["basis_date"] if report else ""
+    queue_status_section = render_stock_queue_status(stock_queue)
+    trackable_history_section = render_trackable_history(trackable_history)
 
     history_rows = "".join(
         f"""<tr>
@@ -701,17 +811,17 @@ def render_stock_page(code: str) -> bytes:
       <div class="content">
         <div class="page-title-row">
           <div>
-            <h1>{esc(leader['name'])}</h1>
-            <p class="muted">{xueqiu_stock_link(leader['code'], leader['xueqiu_url'])} · {esc(leader['theme'])} · {esc(leader['candidate_leader_claim'])}</p>
+            <h1>{esc(stock_name)}</h1>
+            <p class="muted">{xueqiu_stock_link(code, xueqiu_url)} · {esc(stock_theme)} · {esc(stock_claim)}</p>
           </div>
           <div class="report-box">
-            <span>深研评级</span>
-            <strong>{esc(leader['deep_rating'])} {esc(leader['deep_label'])}</strong>
-            <span>{esc(report['basis_date'] if report else '')}</span>
+            <span>研究来源</span>
+            <strong>{esc(rating_label)}</strong>
+            <span>{esc(report_date)}</span>
           </div>
         </div>
         <div class="summary-grid">
-          {metric("深研分", leader["deep_score"])}
+          {metric("深研分", leader["deep_score"] if leader is not None else None)}
           {metric("收盘", market.get("close"))}
           {metric("PE TTM", market.get("pe_ttm"))}
           {metric("PB", market.get("pb"))}
@@ -721,7 +831,9 @@ def render_stock_page(code: str) -> bytes:
       </div>
     </section>
     <section class="content">
+      {queue_status_section}
       {render_valuation_chart(chart_runs, chart_prices)}
+      {trackable_history_section}
       <section class="two-col">
         <div class="section-block">
           <h2>行业地位</h2>
@@ -767,7 +879,7 @@ def render_stock_page(code: str) -> bytes:
       </section>
     </section>
 """
-    return render_layout(f"{leader['name']} {leader['code']}", body)
+    return render_layout(f"{stock_name} {code}", body)
 
 
 def api_stocks() -> bytes:
@@ -868,10 +980,19 @@ def api_latest() -> bytes:
 
 def api_stock(code: str) -> bytes:
     with closing(connect(DB_PATH)) as conn:
-        leader = get_latest_leader(conn, code)
+        leader = get_latest_leader(conn, code) or get_known_leader(conn, code)
         runs = rows_to_dicts(list_research_runs(conn, code))
+        queue = rows_to_dicts(list_queue_for_stock(conn, code))
+        trackable = rows_to_dicts(list_trackable_history(conn, code))
+    for row in queue:
+        row["source_label"] = queue_source_label(row.get("source_type"))
     return json.dumps(
-        {"leader": dict(leader) if leader else None, "research_runs": runs},
+        {
+            "leader": dict(leader) if leader else None,
+            "research_runs": runs,
+            "queue": queue,
+            "trackable_history": trackable,
+        },
         ensure_ascii=False,
     ).encode("utf-8")
 
@@ -879,6 +1000,8 @@ def api_stock(code: str) -> bytes:
 def api_queue() -> bytes:
     with closing(connect(DB_PATH)) as conn:
         rows = rows_to_dicts(list_queue(conn))
+    for row in rows:
+        row["source_label"] = queue_source_label(row.get("source_type"))
     return json.dumps({"items": rows}, ensure_ascii=False).encode("utf-8")
 
 
@@ -890,6 +1013,9 @@ class MyInvestStockHandler(BaseHTTPRequestHandler):
         path = unquote(parsed.path)
         if path == "/":
             self.send_bytes(render_home(), "text/html; charset=utf-8")
+            return
+        if path == "/research":
+            self.handle_research_gateway(parsed.query)
             return
         if path == "/api/index":
             self.send_bytes(api_index(), "application/json; charset=utf-8")
@@ -915,6 +1041,25 @@ class MyInvestStockHandler(BaseHTTPRequestHandler):
             self.send_static(path.removeprefix("/static/"))
             return
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+
+    def handle_research_gateway(self, query: str) -> None:
+        code, requested_name = normalize_stock_query(parse_qs(query))
+        if code is None or not STOCK_CODE_RE.match(code):
+            self.send_error(HTTPStatus.BAD_REQUEST, "Invalid stock code")
+            return
+        with closing(connect(DB_PATH)) as conn:
+            exists, known_name = _stock_exists(conn, code)
+        queued = False
+        if not exists:
+            enqueue_requested_stock(code, name=requested_name or known_name or code)
+            queued = True
+        location = f"/stocks/{quote(code)}"
+        if queued:
+            location += "?queued=1"
+        self.send_response(HTTPStatus.SEE_OTHER)
+        self.send_header("Location", location)
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
 
     def send_bytes(self, body: bytes, content_type: str) -> None:
         self.send_response(HTTPStatus.OK)
