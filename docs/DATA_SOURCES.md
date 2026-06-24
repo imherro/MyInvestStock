@@ -16,6 +16,14 @@ key_results.primary_output.items
 
 该路径表示页面中的 `A 可跟踪龙头`，当前用于生成个股深研队列。不要从 `/api/latest` 的 `themes[].stock_leaders` 扩展研究池。
 
+主线环境只读自：
+
+```text
+https://theme.okbbc.com/api/index
+```
+
+可引用字段包括 `mainline_ranking`、`legacy_theme_ranking` 和 `market`。这些字段只作为已入库上游信号使用；MyInvestStock 不重新研究主线强弱、ETF/板块趋势、拥挤度或风险偏好。
+
 ## 结构化金融数据
 
 - Tushare：A 股结构化主源，使用本地 `.env` 中的 `TUSHARE_TOKEN`。
