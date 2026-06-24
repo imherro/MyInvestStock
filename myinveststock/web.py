@@ -169,9 +169,116 @@ def fmt_num(value: object, digits: int = 2) -> str:
         return esc(value)
 
 
+def _num(value: object) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def score_state(value: object, *, kind: str = "default") -> str:
+    number = _num(value)
+    if number is None:
+        return "待入库"
+    if kind == "valuation_safety":
+        if number >= 85:
+            return "估值安全边际较高"
+        if number >= 70:
+            return "估值相对可接受"
+        if number >= 50:
+            return "估值中性，需结合增长验证"
+        return "估值压力较高"
+    if kind == "evidence_quality":
+        if number >= 85:
+            return "证据强，龙头判断较扎实"
+        if number >= 70:
+            return "证据较充分"
+        if number >= 60:
+            return "证据可观察，仍需深研确认"
+        return "证据偏弱"
+    if kind == "deep_score":
+        if number >= 80:
+            return "高优先级深研对象"
+        if number >= 70:
+            return "可跟踪深研对象"
+        if number >= 60:
+            return "观察型候选"
+        return "低优先级候选"
+    if number >= 85:
+        return "强"
+    if number >= 70:
+        return "较好"
+    if number >= 60:
+        return "中性"
+    return "偏弱"
+
+
+def ratio_state(label: str, value: object) -> str:
+    number = _num(value)
+    if number is None:
+        return "待入库"
+    if label == "PE TTM":
+        if number <= 0:
+            return "亏损或口径不适用"
+        if number < 15:
+            return "低市盈率区间"
+        if number < 30:
+            return "中等市盈率区间"
+        if number < 60:
+            return "较高市盈率，需增长兑现"
+        return "高市盈率，需强增长支撑"
+    if label == "PB":
+        if number < 1:
+            return "低于净资产定价"
+        if number < 3:
+            return "常见市净率区间"
+        if number < 6:
+            return "较高市净率，需高 ROE 支撑"
+        return "高市净率，需强盈利质量支撑"
+    return "行情快照"
+
+
+def metric_explanation(label: str, value: object) -> tuple[str, str]:
+    if label in {"深研", "深研分"}:
+        return (
+            "综合入口评分",
+            f"{score_state(value, kind='deep_score')}。衡量这只股票是否值得进入个股深研队列，不等于最终重仓结论。",
+        )
+    if label == "收盘":
+        return (
+            "行情快照",
+            "基准数据中的收盘价，单位通常为元/股；它是价格参照，不代表合理估值。",
+        )
+    if label in {"PE TTM", "PB"}:
+        return (
+            "估值倍数",
+            f"{ratio_state(label, value)}。这是入口快照口径，仍需结合行业、增长、ROE 和现金流判断。",
+        )
+    if label == "证据质量":
+        return (
+            "龙头证据强度",
+            f"{score_state(value, kind='evidence_quality')}。分数越高，说明支持龙头地位的硬证据越充分。",
+        )
+    if label == "估值安全":
+        return (
+            "入口估值安全度",
+            f"{score_state(value, kind='valuation_safety')}。分数越高，表示入口筛选看估值越不紧张；最终估值区间以后续财务深研为准。",
+        )
+    return ("指标说明", "入口展示指标，用于辅助筛选和跟踪。")
+
+
 def metric(label: str, value: object, unit: str = "") -> str:
     shown = fmt_num(value) if isinstance(value, (int, float)) else esc(value or "待入库")
-    return f"""<div class="metric"><span>{esc(label)}</span><strong>{shown}{esc(unit)}</strong></div>"""
+    tooltip_title, tooltip_body = metric_explanation(label, value)
+    tooltip_text = f"{tooltip_title}：{tooltip_body}"
+    return f"""<div class="metric" tabindex="0" title="{esc(tooltip_text)}" aria-label="{esc(label)}：{esc(shown)}{esc(unit)}。{esc(tooltip_text)}">
+      <span>{esc(label)}</span>
+      <strong>{shown}{esc(unit)}</strong>
+      <div class="metric-tooltip" role="tooltip">
+        <b>{esc(tooltip_title)}</b>
+        <em>{esc(tooltip_body)}</em>
+      </div>
+    </div>"""
 
 
 def xueqiu_url_for_code(code: object, preferred_url: object | None = None) -> str:

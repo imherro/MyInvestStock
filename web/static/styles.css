@@ -205,11 +205,23 @@ h2 {
 }
 
 .metric {
+  position: relative;
   min-height: 68px;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #fbfcfe;
+  cursor: help;
+  outline: none;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+
+.metric:hover,
+.metric:focus-visible {
+  z-index: 5;
+  border-color: #99d6cd;
+  background: #ffffff;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
 }
 
 .metric strong {
@@ -217,6 +229,45 @@ h2 {
   margin-top: 6px;
   font-size: 18px;
   overflow-wrap: anywhere;
+}
+
+.metric-tooltip {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  z-index: 20;
+  display: none;
+  width: min(280px, 78vw);
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.metric-tooltip b,
+.metric-tooltip em {
+  display: block;
+  font-style: normal;
+}
+
+.metric-tooltip b {
+  margin-bottom: 4px;
+  color: #0f172a;
+}
+
+.metric:hover .metric-tooltip,
+.metric:focus-visible .metric-tooltip {
+  display: block;
+}
+
+.summary-grid .metric:nth-child(5) .metric-tooltip,
+.summary-grid .metric:nth-child(6) .metric-tooltip {
+  right: 0;
+  left: auto;
 }
 
 .section-block {

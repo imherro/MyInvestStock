@@ -29,6 +29,7 @@ from myinveststock.web import (
     FOOTER_SCRIPT_URL,
     STATIC_ASSET_VERSION,
     leader_to_summary,
+    metric,
     render_layout,
     render_queue_rows,
     render_valuation_chart,
@@ -100,6 +101,14 @@ class ContractTests(unittest.TestCase):
         page = render_layout("title", "<p>body</p>").decode("utf-8")
         self.assertIn(f'<script src="{FOOTER_SCRIPT_URL}" defer></script>', page)
         self.assertIn(f'/static/styles.css?v={STATIC_ASSET_VERSION}', page)
+
+    def test_metric_card_includes_hover_explanation(self) -> None:
+        html = metric("估值安全", 83.36)
+        self.assertIn('class="metric"', html)
+        self.assertIn('tabindex="0"', html)
+        self.assertIn('class="metric-tooltip"', html)
+        self.assertIn("入口估值安全度", html)
+        self.assertIn("估值相对可接受", html)
 
     def test_queue_rows_link_to_stock_page(self) -> None:
         html = render_queue_rows(
