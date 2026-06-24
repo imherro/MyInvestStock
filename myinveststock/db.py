@@ -343,12 +343,48 @@ def list_queue(conn: sqlite3.Connection, status: str | None = None) -> list[sqli
 def next_queue_item(conn: sqlite3.Connection) -> sqlite3.Row | None:
     return conn.execute(
         """
-        SELECT *
-        FROM research_queue
-        WHERE status = 'pending'
-        ORDER BY priority ASC, stage ASC, id ASC
+        SELECT q.*
+        FROM research_queue q
+        WHERE q.status = 'pending'
+          AND (
+              q.depends_on_task_type IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM stock_research_runs r
+                  WHERE r.code = q.code
+                    AND r.task_type = q.depends_on_task_type
+                    AND r.status = 'complete'
+              )
+          )
+        ORDER BY q.priority ASC, q.stage ASC, q.id ASC
         LIMIT 1
         """
+    ).fetchone()
+
+
+def claim_next_queue_item(conn: sqlite3.Connection) -> sqlite3.Row | None:
+    now = utc_now()
+    conn.execute("BEGIN IMMEDIATE")
+    row = next_queue_item(conn)
+    if row is None:
+        conn.commit()
+        return None
+    conn.execute(
+        """
+        UPDATE research_queue
+        SET status = 'in_progress', updated_at = ?
+        WHERE id = ? AND status = 'pending'
+        """,
+        (now, row["id"]),
+    )
+    conn.commit()
+    return conn.execute(
+        """
+        SELECT *
+        FROM research_queue
+        WHERE id = ?
+        """,
+        (row["id"],),
     ).fetchone()
 
 

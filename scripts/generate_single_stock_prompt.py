@@ -12,7 +12,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 from myinveststock.config import DB_PATH
-from myinveststock.db import connect, list_queue, next_queue_item
+from myinveststock.db import claim_next_queue_item, connect, list_queue, next_queue_item
 
 
 def main() -> int:
@@ -21,11 +21,14 @@ def main() -> int:
     group.add_argument("--next", action="store_true", help="Use the next pending queue item.")
     group.add_argument("--code", help="Use a specific stock code from the queue.")
     parser.add_argument("--task-type", choices=["strategic", "financial"], help="Limit --code to one task type.")
+    parser.add_argument("--claim", action="store_true", help="Mark the selected --next task as in_progress.")
     args = parser.parse_args()
+    if args.claim and not args.next:
+        parser.error("--claim can only be used with --next")
 
     with closing(connect(DB_PATH)) as conn:
         if args.next:
-            row = next_queue_item(conn)
+            row = claim_next_queue_item(conn) if args.claim else next_queue_item(conn)
         else:
             matches = [
                 item
@@ -35,7 +38,7 @@ def main() -> int:
             ]
             row = matches[0] if matches else None
     if row is None:
-        print("没有找到待研究股票。请先运行 python scripts/ingest_index.py。")
+        print("没有找到可领取的待研究股票。请先运行 python scripts/ingest_index.py，或等待前置战略深研完成。")
         return 1
     print(row["task_keyword"])
     print(f"task_type={row['task_type']}")

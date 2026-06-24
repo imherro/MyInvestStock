@@ -40,10 +40,12 @@
 
 规则：
 
-- 只从本地 `research_queue` 读取 pending 任务，不重新扩展股票池。
+- 只从本地 `research_queue` 领取 pending 任务，不重新扩展股票池。
+- 领取任务时把状态标记为 `in_progress`，避免高频自动化重复处理同一项。
 - 每次只研究一只股票、一个任务类型。
 - strategic 任务只做战略和竞争研究，不写估值区间。
 - financial 任务必须依赖已有 strategic 底稿，可以多次刷新估值和财务结论。
+- strategic 底稿未完成时，不提前领取对应 financial 任务。
 - 如果队列为空，汇报队列为空，不生成研究正文。
 
 提示词：
@@ -54,7 +56,7 @@
 核心原则：每次自动化运行只处理一条 pending 队列任务，只研究一只股票。不要一次研究多只股票，不要在一个提示词里混合多个股票。不要重新扩展股票池，不要从上游 /api/latest 或其他候选矩阵添加股票。
 
 执行步骤：
-1. 在本地队列中读取下一条 pending 任务，优先使用 python scripts/generate_single_stock_prompt.py --next 生成本次唯一研究提示词。
+1. 在本地队列中领取下一条 pending 任务，优先使用 python scripts/generate_single_stock_prompt.py --next --claim 生成本次唯一研究提示词，并把任务标记为 in_progress。
 2. 如果没有待研究任务，验证 http://127.0.0.1:8016/api/index 和 http://127.0.0.1:8016/api/latest 可用后，汇报“队列为空”，本次结束。
 3. 如果领取到 strategic 任务：只研究这一只股票的行业位置、市场空间、竞争格局、上下游、战略壁垒、五倍/十倍潜力和战略证伪条件；不写估值区间，不写买卖建议；输出 task_type='strategic' 的结构化 JSON，并通过 scripts/import_research_run.py 入库。
 4. 如果领取到 financial 任务：先确认该股票已有 task_type='strategic' 的战略底稿；如果没有战略底稿，把该 financial 任务标记为 blocked，并停止；如果有战略底稿，只研究财务质量、增长率、估值方法、合理估值区间、当前价格位置、五倍/十倍潜力财务校验、重仓研究资格和财务证伪条件；输出 task_type='financial' 的结构化 JSON，并通过 scripts/import_research_run.py 入库。
