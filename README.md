@@ -15,13 +15,13 @@ MyInvestStock 是一个 A 股龙头个股深研工作台。它只从 `https://le
 
 ```powershell
 python scripts/ingest_index.py
-python scripts/run_web.py --port 8015
+python scripts/run_web.py
 ```
 
 打开：
 
 ```text
-http://127.0.0.1:8015/
+http://127.0.0.1:8016/
 ```
 
 ## 单股深研流程

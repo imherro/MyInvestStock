@@ -26,7 +26,7 @@ flowchart LR
   F --> G2["Codex 单股财务估值深研"]
   G1 --> H["SQLite: stock_research_runs"]
   G2 --> H
-  H --> I["8015 Web 个股页"]
+  H --> I["8016 Web 个股页"]
   D --> I
 ```
 
@@ -37,7 +37,7 @@ flowchart LR
 - `myinveststock/web.py`：只读 Web 页面和 JSON API。
 - `scripts/ingest_index.py`：每日发现队列。
 - `scripts/generate_single_stock_prompt.py`：一次只生成一只股票、一个阶段的深研提示词。
-- `scripts/run_web.py`：启动 8015 本地 Web。
+- `scripts/run_web.py`：启动 8016 本地 Web。
 
 ## Web 路由
 

@@ -10,4 +10,4 @@ LEADER_INDEX_URL = "https://leader.okbbc.com/api/index"
 FOOTER_SCRIPT_URL = "https://invest.okbbc.com/footer.js"
 
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8015
+DEFAULT_PORT = 8016
