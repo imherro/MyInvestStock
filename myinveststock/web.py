@@ -166,6 +166,45 @@ def metric(label: str, value: object, unit: str = "") -> str:
     return f"""<div class="metric"><span>{esc(label)}</span><strong>{shown}{esc(unit)}</strong></div>"""
 
 
+def xueqiu_url_for_code(code: object, preferred_url: object | None = None) -> str:
+    if preferred_url:
+        return str(preferred_url)
+    text = str(code)
+    if "." not in text:
+        return "https://xueqiu.com/"
+    symbol, exchange = text.split(".", 1)
+    return f"https://xueqiu.com/S/{exchange.upper()}{symbol}"
+
+
+def stock_page_link(code: object, label: object) -> str:
+    safe_code = esc(code)
+    return f"""<a class="table-link" href="/stocks/{safe_code}">{esc(label)}</a>"""
+
+
+def xueqiu_stock_link(code: object, preferred_url: object | None = None) -> str:
+    return (
+        f"""<a class="code-link" href="{esc(xueqiu_url_for_code(code, preferred_url))}" """
+        f"""target="_blank" rel="noopener noreferrer">{esc(code)}</a>"""
+    )
+
+
+def render_queue_rows(queue: list[object]) -> str:
+    if not queue:
+        return '<tr><td colspan="7" class="empty-cell">当前队列为空。</td></tr>'
+    return "".join(
+        f"""<tr>
+      <td>{esc(row['priority'])}</td>
+      <td>{esc(row['stage'])}</td>
+      <td>{xueqiu_stock_link(row['code'])}</td>
+      <td>{stock_page_link(row['code'], row['name'])}</td>
+      <td>{esc(row['task_type'])}</td>
+      <td>{esc(row['status'])}</td>
+      <td>{esc(row['task_keyword'])}</td>
+    </tr>"""
+        for row in queue
+    )
+
+
 def render_home() -> bytes:
     with closing(connect(DB_PATH)) as conn:
         report = latest_report(conn)
@@ -190,7 +229,7 @@ def render_home() -> bytes:
             f"""<article class="stock-card">
         <div>
           <a class="stock-title" href="/stocks/{esc(row['code'])}">{esc(row['name'])}</a>
-          <div class="stock-code">{esc(row['code'])}</div>
+          <div class="stock-code">{xueqiu_stock_link(row['code'], row['xueqiu_url'])}</div>
         </div>
         <div class="badges">
           <span class="badge badge-strong">{esc(row['deep_rating'] or '')} {esc(row['deep_label'] or '')}</span>
@@ -206,18 +245,7 @@ def render_home() -> bytes:
       </article>"""
         )
 
-    queue_rows = "".join(
-        f"""<tr>
-      <td>{esc(row['priority'])}</td>
-      <td>{esc(row['stage'])}</td>
-      <td>{esc(row['code'])}</td>
-      <td>{esc(row['name'])}</td>
-      <td>{esc(row['task_type'])}</td>
-      <td>{esc(row['status'])}</td>
-      <td>{esc(row['task_keyword'])}</td>
-    </tr>"""
-        for row in queue
-    )
+    queue_rows = render_queue_rows(queue)
     body = f"""
     <section class="page-band">
       <div class="content">
@@ -325,7 +353,7 @@ def render_stock_page(code: str) -> bytes:
         <div class="page-title-row">
           <div>
             <h1>{esc(leader['name'])}</h1>
-            <p class="muted">{esc(leader['code'])} · {esc(leader['theme'])} · {esc(leader['candidate_leader_claim'])}</p>
+            <p class="muted">{xueqiu_stock_link(leader['code'], leader['xueqiu_url'])} · {esc(leader['theme'])} · {esc(leader['candidate_leader_claim'])}</p>
           </div>
           <div class="report-box">
             <span>深研评级</span>

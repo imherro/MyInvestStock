@@ -62,14 +62,24 @@ code {
 }
 
 .top-nav a,
-.text-link {
+.text-link,
+.table-link,
+.code-link {
   text-decoration: none;
 }
 
 .top-nav a:hover,
 .text-link:hover,
+.table-link:hover,
+.code-link:hover,
 .stock-title:hover {
   color: var(--accent);
+}
+
+.table-link,
+.code-link {
+  color: var(--accent-2);
+  font-weight: 600;
 }
 
 .page-band {

@@ -3,7 +3,16 @@ from __future__ import annotations
 import unittest
 
 from myinveststock.leader_index import build_financial_prompt, build_strategic_prompt, primary_items, report_meta
-from myinveststock.web import FOOTER_SCRIPT_URL, STATIC_ASSET_VERSION, leader_to_summary, render_layout, research_run_to_summary
+from myinveststock.web import (
+    FOOTER_SCRIPT_URL,
+    STATIC_ASSET_VERSION,
+    leader_to_summary,
+    render_layout,
+    render_queue_rows,
+    research_run_to_summary,
+    xueqiu_stock_link,
+    xueqiu_url_for_code,
+)
 
 
 class ContractTests(unittest.TestCase):
@@ -47,6 +56,33 @@ class ContractTests(unittest.TestCase):
         page = render_layout("title", "<p>body</p>").decode("utf-8")
         self.assertIn(f'<script src="{FOOTER_SCRIPT_URL}" defer></script>', page)
         self.assertIn(f'/static/styles.css?v={STATIC_ASSET_VERSION}', page)
+
+    def test_queue_rows_link_to_stock_page(self) -> None:
+        html = render_queue_rows(
+            [
+                {
+                    "priority": 1,
+                    "stage": 2,
+                    "code": "600519.SH",
+                    "name": "贵州茅台",
+                    "task_type": "financial",
+                    "status": "pending",
+                    "task_keyword": "MyInvestStock 个股财务估值深研 600519.SH 贵州茅台",
+                }
+            ]
+        )
+        self.assertIn('href="/stocks/600519.SH"', html)
+        self.assertIn('href="https://xueqiu.com/S/SH600519"', html)
+        self.assertIn('target="_blank"', html)
+        self.assertIn(">贵州茅台</a>", html)
+
+    def test_stock_code_links_to_xueqiu_new_window(self) -> None:
+        self.assertEqual(xueqiu_url_for_code("603259.SH"), "https://xueqiu.com/S/SH603259")
+        self.assertEqual(xueqiu_url_for_code("300750.SZ"), "https://xueqiu.com/S/SZ300750")
+        link = xueqiu_stock_link("688256.SH")
+        self.assertIn('href="https://xueqiu.com/S/SH688256"', link)
+        self.assertIn('target="_blank"', link)
+        self.assertIn('rel="noopener noreferrer"', link)
 
     def test_index_leader_summary_contract(self) -> None:
         row = {
