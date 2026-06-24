@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from myinveststock.leader_index import build_financial_prompt, build_strategic_prompt, primary_items, report_meta
-from myinveststock.web import FOOTER_SCRIPT_URL, leader_to_summary, render_layout, research_run_to_summary
+from myinveststock.web import FOOTER_SCRIPT_URL, STATIC_ASSET_VERSION, leader_to_summary, render_layout, research_run_to_summary
 
 
 class ContractTests(unittest.TestCase):
@@ -46,6 +46,7 @@ class ContractTests(unittest.TestCase):
     def test_footer_script_is_in_layout(self) -> None:
         page = render_layout("title", "<p>body</p>").decode("utf-8")
         self.assertIn(f'<script src="{FOOTER_SCRIPT_URL}" defer></script>', page)
+        self.assertIn(f'/static/styles.css?v={STATIC_ASSET_VERSION}', page)
 
     def test_index_leader_summary_contract(self) -> None:
         row = {
