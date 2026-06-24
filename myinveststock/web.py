@@ -21,6 +21,7 @@ from .db import (
     rows_to_dicts,
     valuation_runs,
 )
+from .config import LEADER_INDEX_URL
 
 STOCK_CODE_RE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
 
@@ -38,6 +39,90 @@ def load_json(value: str | None, fallback: object) -> object:
         return json.loads(value)
     except json.JSONDecodeError:
         return fallback
+
+
+def leader_to_summary(row: object) -> dict[str, object]:
+    market = load_json(row["market_json"], {})
+    scores = load_json(row["scores_json"], {})
+    return {
+        "code": row["code"],
+        "name": row["name"],
+        "theme": row["theme"],
+        "themes": load_json(row["themes_json"], []),
+        "deep_rating": row["deep_rating"],
+        "deep_label": row["deep_label"],
+        "deep_score": row["deep_score"],
+        "shadow_observation_eligible": bool(row["shadow_observation_eligible"]),
+        "candidate": {
+            "leader_tier": row["candidate_leader_tier"],
+            "leader_claim": row["candidate_leader_claim"],
+            "evidence_score": row["candidate_evidence_score"],
+            "evidence_count": row["candidate_evidence_count"],
+            "hard_evidence_count": row["candidate_hard_evidence_count"],
+        },
+        "market": market,
+        "scores": scores,
+        "risk_flags": load_json(row["risk_flags_json"], []),
+        "data_gaps": load_json(row["data_gaps_json"], []),
+        "links": {
+            "page": f"/stocks/{row['code']}",
+            "api": f"/api/stocks/{row['code']}",
+            "xueqiu": row["xueqiu_url"],
+        },
+    }
+
+
+def research_run_to_summary(row: object) -> dict[str, object]:
+    return {
+        "id": row["id"],
+        "task_type": row["task_type"],
+        "research_date": row["research_date"],
+        "status": row["status"],
+        "title": row["title"],
+        "summary": row["summary"],
+        "valuation": {
+            "low": row["valuation_low"],
+            "mid": row["valuation_mid"],
+            "high": row["valuation_high"],
+            "unit": row["valuation_unit"],
+            "method": row["valuation_method"],
+            "confidence": row["valuation_confidence"],
+        },
+        "industry_position": row["industry_position"],
+        "competition_landscape": row["competition_landscape"],
+        "upstream_downstream": row["upstream_downstream"],
+        "annual_growth": row["annual_growth"],
+        "multi_bagger_potential": row["multi_bagger_potential"],
+        "heavy_position_view": row["heavy_position_view"],
+        "evidence": load_json(row["evidence_json"], []),
+        "assumptions": load_json(row["assumptions_json"], []),
+        "risks": load_json(row["risks_json"], []),
+    }
+
+
+def latest_by_task_type(runs: list[object], task_type: str) -> dict[str, object] | None:
+    for row in runs:
+        if row["task_type"] == task_type:
+            return research_run_to_summary(row)
+    return None
+
+
+def valuation_history_payload(runs: list[object]) -> list[dict[str, object]]:
+    history = []
+    for row in runs:
+        history.append(
+            {
+                "research_date": row["research_date"],
+                "low": row["valuation_low"],
+                "mid": row["valuation_mid"],
+                "high": row["valuation_high"],
+                "unit": row["valuation_unit"],
+                "method": row["valuation_method"],
+                "confidence": row["valuation_confidence"],
+                "heavy_position_view": row["heavy_position_view"],
+            }
+        )
+    return history
 
 
 def render_layout(title: str, body: str) -> bytes:
@@ -315,6 +400,95 @@ def api_stocks() -> bytes:
     return json.dumps({"report": dict(report) if report else None, "items": leaders}, ensure_ascii=False).encode("utf-8")
 
 
+def api_index() -> bytes:
+    with closing(connect(DB_PATH)) as conn:
+        report = latest_report(conn)
+        leaders = list_latest_leaders(conn)
+    items = [leader_to_summary(row) for row in leaders]
+    payload = {
+        "schema_version": "myinveststock.index.v1",
+        "page": {
+            "title": "MyInvestStock",
+            "primary_endpoint": "/api/index",
+            "latest_endpoint": "/api/latest",
+            "primary_result_path": "key_results.primary_output.items",
+        },
+        "source": {
+            "upstream_endpoint": LEADER_INDEX_URL,
+            "upstream_result_path": "key_results.primary_output.items",
+            "source_policy": "only A trackable leaders; do not expand from upstream /api/latest themes[].stock_leaders",
+        },
+        "report": dict(report) if report else None,
+        "key_results": {
+            "primary_output": {
+                "title": "A可跟踪龙头",
+                "count": len(items),
+                "items": items,
+            }
+        },
+        "links": {
+            "web": "/",
+            "latest": "/api/latest",
+            "queue": "/api/queue",
+            "stocks": "/api/stocks",
+        },
+        "constraints": {
+            "read_only": True,
+            "research_only": True,
+            "contains_trade_orders": False,
+            "contains_cash_amounts": False,
+            "contains_share_counts": False,
+        },
+    }
+    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+
+def api_latest() -> bytes:
+    with closing(connect(DB_PATH)) as conn:
+        report = latest_report(conn)
+        leaders = list_latest_leaders(conn)
+        stocks = []
+        research_run_count = 0
+        valuation_run_count = 0
+        for leader in leaders:
+            runs = list_research_runs(conn, leader["code"])
+            valuation_runs_for_stock = valuation_runs(conn, leader["code"])
+            research_run_count += len(runs)
+            valuation_run_count += len(valuation_runs_for_stock)
+            strategic = latest_by_task_type(runs, "strategic")
+            financial = latest_by_task_type(runs, "financial")
+            stocks.append(
+                {
+                    "leader": leader_to_summary(leader),
+                    "research": {
+                        "strategic": strategic,
+                        "financial": financial,
+                        "latest": financial or strategic,
+                        "valuation_history": valuation_history_payload(valuation_runs_for_stock),
+                        "run_count": len(runs),
+                    },
+                }
+            )
+    payload = {
+        "schema_version": "myinveststock.research.v1",
+        "report": dict(report) if report else None,
+        "summary": {
+            "stock_count": len(stocks),
+            "research_run_count": research_run_count,
+            "valuation_run_count": valuation_run_count,
+        },
+        "stocks": stocks,
+        "constraints": {
+            "read_only": True,
+            "research_only": True,
+            "contains_trade_orders": False,
+            "contains_cash_amounts": False,
+            "contains_share_counts": False,
+        },
+    }
+    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+
 def api_stock(code: str) -> bytes:
     with closing(connect(DB_PATH)) as conn:
         leader = get_latest_leader(conn, code)
@@ -339,6 +513,12 @@ class MyInvestStockHandler(BaseHTTPRequestHandler):
         path = unquote(parsed.path)
         if path == "/":
             self.send_bytes(render_home(), "text/html; charset=utf-8")
+            return
+        if path == "/api/index":
+            self.send_bytes(api_index(), "application/json; charset=utf-8")
+            return
+        if path == "/api/latest":
+            self.send_bytes(api_latest(), "application/json; charset=utf-8")
             return
         if path == "/api/stocks":
             self.send_bytes(api_stocks(), "application/json; charset=utf-8")

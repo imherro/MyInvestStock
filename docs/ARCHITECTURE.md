@@ -42,6 +42,8 @@ flowchart LR
 ## Web 路由
 
 - `/`：今日 A 可跟踪龙头列表。
+- `/api/index`：主要结果接口，面向其他系统集成。
+- `/api/latest`：研究成果接口，面向研究结果消费。
 - `/stocks/{code}`：单股深研页面。
 - `/api/stocks`：最新股票列表 JSON。
 - `/api/stocks/{code}`：单股页面数据 JSON。

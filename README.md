@@ -24,6 +24,12 @@ python scripts/run_web.py
 http://127.0.0.1:8016/
 ```
 
+## 集成接口
+
+- `/api/index`：输出主要结果信息，供其他系统集成。主结果路径是 `key_results.primary_output.items`。
+- `/api/latest`：输出当前个股研究成果，包括战略深研、财务估值深研和估值区间历史。
+- `/api/queue`：输出当前单股研究队列。
+
 ## 单股深研流程
 
 1. 运行 `python scripts/ingest_index.py` 更新今日队列。

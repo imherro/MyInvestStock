@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from myinveststock.leader_index import build_financial_prompt, build_strategic_prompt, primary_items, report_meta
-from myinveststock.web import FOOTER_SCRIPT_URL, render_layout
+from myinveststock.web import FOOTER_SCRIPT_URL, leader_to_summary, render_layout, research_run_to_summary
 
 
 class ContractTests(unittest.TestCase):
@@ -46,6 +46,61 @@ class ContractTests(unittest.TestCase):
     def test_footer_script_is_in_layout(self) -> None:
         page = render_layout("title", "<p>body</p>").decode("utf-8")
         self.assertIn(f'<script src="{FOOTER_SCRIPT_URL}" defer></script>', page)
+
+    def test_index_leader_summary_contract(self) -> None:
+        row = {
+            "code": "603259.SH",
+            "name": "药明康德",
+            "theme": "创新药/医药",
+            "themes_json": '["创新药/医药"]',
+            "deep_rating": "A",
+            "deep_label": "可跟踪龙头",
+            "deep_score": 75.34,
+            "shadow_observation_eligible": 1,
+            "candidate_leader_tier": "证据确认龙头",
+            "candidate_leader_claim": "CXO龙头",
+            "candidate_evidence_score": 86.55,
+            "candidate_evidence_count": 4,
+            "candidate_hard_evidence_count": 3,
+            "market_json": '{"close":106.83}',
+            "scores_json": '{"valuation_safety":83.28}',
+            "risk_flags_json": "[]",
+            "data_gaps_json": "[]",
+            "xueqiu_url": "https://xueqiu.com/S/SH603259",
+        }
+        summary = leader_to_summary(row)
+        self.assertEqual(summary["code"], "603259.SH")
+        self.assertEqual(summary["links"]["api"], "/api/stocks/603259.SH")
+        self.assertEqual(summary["market"]["close"], 106.83)
+
+    def test_latest_research_summary_contract(self) -> None:
+        row = {
+            "id": 1,
+            "task_type": "financial",
+            "research_date": "2026-06-24",
+            "status": "complete",
+            "title": "财务估值深研",
+            "summary": "示例",
+            "valuation_low": 90,
+            "valuation_mid": 120,
+            "valuation_high": 150,
+            "valuation_unit": "CNY/share",
+            "valuation_method": "PE",
+            "valuation_confidence": "medium",
+            "industry_position": None,
+            "competition_landscape": None,
+            "upstream_downstream": None,
+            "annual_growth": "收入增长",
+            "multi_bagger_potential": "需要盈利扩张",
+            "heavy_position_view": "可跟踪",
+            "evidence_json": "[]",
+            "assumptions_json": "[]",
+            "risks_json": '["估值收缩"]',
+        }
+        summary = research_run_to_summary(row)
+        self.assertEqual(summary["task_type"], "financial")
+        self.assertEqual(summary["valuation"]["mid"], 120)
+        self.assertEqual(summary["risks"], ["估值收缩"])
 
 
 if __name__ == "__main__":

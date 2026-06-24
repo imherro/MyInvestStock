@@ -42,10 +42,11 @@ def main() -> int:
             print(exc)
             ok &= check(False, f"import {module}")
 
-    web_source = (ROOT / "myinveststock" / "web.py").read_text(encoding="utf-8")
     config_source = (ROOT / "myinveststock" / "config.py").read_text(encoding="utf-8")
+    leader_source = (ROOT / "myinveststock" / "leader_index.py").read_text(encoding="utf-8")
     ok &= check("https://invest.okbbc.com/footer.js" in config_source, "unified footer script is wired")
-    ok &= check("/api/latest" not in web_source, "web app does not use /api/latest")
+    ok &= check('LEADER_INDEX_URL = "https://leader.okbbc.com/api/index"' in config_source, "upstream source is /api/index")
+    ok &= check("themes[].stock_leaders" not in leader_source, "ingest does not expand from stock_leaders")
     docs = (ROOT / "docs" / "DATA_SOURCES.md").read_text(encoding="utf-8")
     ok &= check("key_results.primary_output.items" in docs, "primary result path is documented")
     return 0 if ok else 1
