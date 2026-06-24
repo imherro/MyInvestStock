@@ -75,7 +75,7 @@ def build_strategic_prompt(item: dict[str, Any], report: dict[str, Any]) -> str:
     theme = item.get("theme") or ""
     report_id = report["report_id"]
     basis_date = report.get("basis_date") or ""
-    return f"""在 C:\\Users\\kunpeng\\Documents\\MyInvestStock 中执行单股战略深研。
+    return f"""在 C:\\Users\\kunpeng\\Documents\\MyInvestStock 中执行个股战略深研。
 
 唯一研究对象：{code} {name}。
 
@@ -114,7 +114,7 @@ def build_financial_prompt(item: dict[str, Any], report: dict[str, Any]) -> str:
     theme = item.get("theme") or ""
     report_id = report["report_id"]
     basis_date = report.get("basis_date") or ""
-    return f"""在 C:\\Users\\kunpeng\\Documents\\MyInvestStock 中执行单股财务估值深研。
+    return f"""在 C:\\Users\\kunpeng\\Documents\\MyInvestStock 中执行个股财务估值深研。
 
 唯一研究对象：{code} {name}。
 
@@ -188,7 +188,7 @@ def ingest_payload(
                     priority=priority,
                     stage=1,
                     task_type="strategic",
-                    task_keyword=f"MyInvestStock 单股战略深研 {item['code']} {item['name']}",
+                    task_keyword=f"MyInvestStock 个股战略深研 {item['code']} {item['name']}",
                     prompt=build_strategic_prompt(item, report),
                     depends_on_task_type=None,
                     now=now,
@@ -201,7 +201,7 @@ def ingest_payload(
                 priority=priority,
                 stage=2,
                 task_type="financial",
-                task_keyword=f"MyInvestStock 单股财务估值深研 {item['code']} {item['name']}",
+                task_keyword=f"MyInvestStock 个股财务估值深研 {item['code']} {item['name']}",
                 prompt=build_financial_prompt(item, report),
                 depends_on_task_type="strategic",
                 now=now,

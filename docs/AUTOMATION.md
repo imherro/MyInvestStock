@@ -2,11 +2,11 @@
 
 ## 任务拆分
 
-深研必须一次只研究一只股票。单股研究再拆成战略和财务两类：
+深研必须一次只研究一只股票。个股研究再拆成战略和财务两类：
 
 1. `MyInvestStock A可跟踪龙头发现队列`
-2. `MyInvestStock 单股战略深研 {code} {name}`
-3. `MyInvestStock 单股财务估值深研 {code} {name}`
+2. `MyInvestStock 个股战略深研 {code} {name}`
+3. `MyInvestStock 个股财务估值深研 {code} {name}`
 
 ## 发现队列任务
 
@@ -28,12 +28,12 @@
 运行 scripts/ingest_index.py 更新本地 SQLite 队列。完成后汇报 report_id、basis_date、入库股票数量、股票代码和名称，以及生成了哪些 strategic / financial 任务。不要输出 .env 内容。
 ```
 
-## 单股战略深研提示词
+## 个股战略深研提示词
 
 用途：一次只研究一只股票的战略、行业、竞争和长期潜力，并把结果作为长期底稿入库。
 
 ```text
-在 C:\Users\kunpeng\Documents\MyInvestStock 中执行单股战略深研。
+在 C:\Users\kunpeng\Documents\MyInvestStock 中执行个股战略深研。
 
 唯一研究对象：{code} {name}。
 
@@ -66,12 +66,12 @@
 完成后输出结构化 JSON，并通过 `scripts/import_research_run.py` 入库为 task_type='strategic'。战略 JSON 不允许写估值区间字段。
 ```
 
-## 单股财务估值深研提示词
+## 个股财务估值深研提示词
 
 用途：一次只研究一只股票的财务、估值和价格位置，并把估值区间叠加入库。
 
 ```text
-在 C:\Users\kunpeng\Documents\MyInvestStock 中执行单股财务估值深研。
+在 C:\Users\kunpeng\Documents\MyInvestStock 中执行个股财务估值深研。
 
 唯一研究对象：{code} {name}。
 

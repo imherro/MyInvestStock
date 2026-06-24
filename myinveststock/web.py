@@ -238,7 +238,7 @@ def render_home() -> bytes:
       {''.join(cards)}
     </section>
     <section class="content section-block">
-      <h2>单股深研队列</h2>
+      <h2>个股深研队列</h2>
       <div class="table-wrap">
         <table>
           <thead><tr><th>优先级</th><th>阶段</th><th>代码</th><th>名称</th><th>类型</th><th>状态</th><th>任务关键词</th></tr></thead>
@@ -253,7 +253,7 @@ def render_home() -> bytes:
 def render_empty_section(title: str) -> str:
     return f"""<section class="section-block">
       <h2>{esc(title)}</h2>
-      <p class="empty">等待单股深研入库。</p>
+      <p class="empty">等待个股深研入库。</p>
     </section>"""
 
 
@@ -317,7 +317,7 @@ def render_stock_page(code: str) -> bytes:
         for row in runs
     )
     if not history_rows:
-        history_rows = "<tr><td colspan=\"6\" class=\"empty-cell\">等待单股深研入库。</td></tr>"
+        history_rows = "<tr><td colspan=\"6\" class=\"empty-cell\">等待个股深研入库。</td></tr>"
 
     body = f"""
     <section class="page-band">
@@ -377,7 +377,7 @@ def render_stock_page(code: str) -> bytes:
       </section>
       <section class="section-block">
         <h2>风险与证伪</h2>
-        <ul class="risk-list">{risk_items or '<li>等待单股深研入库。</li>'}</ul>
+        <ul class="risk-list">{risk_items or '<li>等待个股深研入库。</li>'}</ul>
       </section>
       <section class="section-block">
         <h2>研究历史</h2>

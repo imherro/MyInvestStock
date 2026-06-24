@@ -14,7 +14,7 @@ https://leader.okbbc.com/api/index
 key_results.primary_output.items
 ```
 
-该路径表示页面中的 `A 可跟踪龙头`，当前用于生成单股深研队列。不要从 `/api/latest` 的 `themes[].stock_leaders` 扩展研究池。
+该路径表示页面中的 `A 可跟踪龙头`，当前用于生成个股深研队列。不要从 `/api/latest` 的 `themes[].stock_leaders` 扩展研究池。
 
 ## 结构化金融数据
 

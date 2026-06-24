@@ -1,12 +1,12 @@
 # MyInvestStock
 
-MyInvestStock 是一个 A 股龙头个股深研工作台。它只从 `https://leader.okbbc.com/api/index` 的 `key_results.primary_output.items` 读取每日 `A 可跟踪龙头`，再把每只股票拆成独立的单股深研任务。
+MyInvestStock 是一个 A 股龙头个股深研工作台。它只从 `https://leader.okbbc.com/api/index` 的 `key_results.primary_output.items` 读取每日 `A 可跟踪龙头`，再把每只股票拆成独立的个股深研任务。
 
 ## 当前边界
 
 - 研究入口固定为 `/api/index`。
 - 深研任务一次只研究一只股票。
-- 单股研究分两类：战略深研默认只做一次，财务估值深研可随数据多次刷新。
+- 个股研究分两类：战略深研默认只做一次，财务估值深研可随数据多次刷新。
 - Web 页面为只读展示，不生成交易指令。
 - `.env` 只保留在本地，GitHub 只提交 `.env.example`。
 - 页面 footer 统一加载 `https://invest.okbbc.com/footer.js`。
@@ -28,9 +28,9 @@ http://127.0.0.1:8016/
 
 - `/api/index`：输出主要结果信息，供其他系统集成。主结果路径是 `key_results.primary_output.items`。
 - `/api/latest`：输出当前个股研究成果，包括战略深研、财务估值深研和估值区间历史。
-- `/api/queue`：输出当前单股研究队列。
+- `/api/queue`：输出当前个股研究队列。
 
-## 单股深研流程
+## 个股深研流程
 
 1. 运行 `python scripts/ingest_index.py` 更新今日队列。
 2. 运行 `python scripts/generate_single_stock_prompt.py --next` 领取一条待研任务。

@@ -11,7 +11,7 @@
 - 年增长率
 - 五倍/十倍潜力
 - 是否具备重仓研究资格
-- 单股历史研究记录
+- 个股历史研究记录
 
 ## 数据流
 
@@ -22,8 +22,8 @@ flowchart LR
   B --> D["SQLite: trackable_leaders"]
   B --> E["SQLite: research_queue"]
   E --> F["generate_single_stock_prompt.py"]
-  F --> G1["Codex 单股战略深研"]
-  F --> G2["Codex 单股财务估值深研"]
+  F --> G1["Codex 个股战略深研"]
+  F --> G2["Codex 个股财务估值深研"]
   G1 --> H["SQLite: stock_research_runs"]
   G2 --> H
   H --> I["8016 Web 个股页"]
@@ -44,9 +44,9 @@ flowchart LR
 - `/`：今日 A 可跟踪龙头列表。
 - `/api/index`：主要结果接口，面向其他系统集成。
 - `/api/latest`：研究成果接口，面向研究结果消费。
-- `/stocks/{code}`：单股深研页面。
+- `/stocks/{code}`：个股深研页面。
 - `/api/stocks`：最新股票列表 JSON。
-- `/api/stocks/{code}`：单股页面数据 JSON。
+- `/api/stocks/{code}`：个股页面数据 JSON。
 - `/api/queue`：当前研究队列 JSON。
 
 ## 页面约束
