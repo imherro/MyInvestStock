@@ -52,6 +52,7 @@
 - `run_id` 由 `stock_code + task_type + research_date + schema_version` 计算，数据库唯一，防止重复研究。
 - financial 估值区间和 signal 必须由 `core/valuation` 的确定性估值引擎生成；LLM 只负责解释，不负责计算估值数值。
 - financial 最终报告必须由 `core/report.build_stock_report(...)` 或 `scripts/build_research_report.py` 生成，禁止手写 dict 拼装最终结构。
+- financial 生成报告时必须开启旁路 trace，使用 `scripts/build_research_report.py --audit-db data/local/myinveststock.sqlite ...` 或等价的 `TraceRecorder + record_trace_events`。
 - 如果队列为空，汇报队列为空，不生成研究正文。
 
 提示词：
@@ -65,7 +66,7 @@
 1. 在本地队列中领取下一条 pending 任务，优先使用 python scripts/generate_single_stock_prompt.py --next --claim 生成本次唯一研究提示词，并把任务标记为 in_progress。
 2. 如果没有待研究任务，验证 http://127.0.0.1:8016/api/index 和 http://127.0.0.1:8016/api/latest 可用后，汇报“队列为空”，本次结束。
 3. 如果领取到 strategic 任务：只研究这一只股票的行业位置、市场空间、竞争格局、上下游、战略壁垒、五倍/十倍潜力和战略证伪条件；不写估值区间，不写买卖建议；输出 task_type='strategic' 的结构化 JSON，并通过 scripts/import_research_run.py 入库。
-4. 如果领取到 financial 任务：先确认该股票已有 task_type='strategic' 的战略底稿；如果没有战略底稿，把该 financial 任务标记为 blocked，并停止；如果有战略底稿，只研究财务质量、增长率、估值方法、合理估值区间、当前价格位置、五倍/十倍潜力财务校验、重仓研究资格和财务证伪条件；先形成结构化 assembly input，再通过 core/report.build_stock_report(...) 或 scripts/build_research_report.py 生成 task_type='financial' 的最终 JSON，并通过 scripts/import_research_run.py 入库。
+4. 如果领取到 financial 任务：先确认该股票已有 task_type='strategic' 的战略底稿；如果没有战略底稿，把该 financial 任务标记为 blocked，并停止；如果有战略底稿，只研究财务质量、增长率、估值方法、合理估值区间、当前价格位置、五倍/十倍潜力财务校验、重仓研究资格和财务证伪条件；先形成结构化 assembly input，再通过 core/report.build_stock_report(...) 或 scripts/build_research_report.py 生成 task_type='financial' 的最终 JSON，并写入 audit_log trace，然后通过 scripts/import_research_run.py 入库。
 
 数据原则：
 - Tushare 是 A 股结构化主源，使用本地 .env，但不要输出任何 token。
@@ -148,6 +149,7 @@ JSON 必须符合 `core/schema/stock_report.py` 的 `StockResearchReport`：`tas
 - 本任务专注财务质量、增长质量、估值区间和重仓研究资格，不重复写泛行业故事。
 - 估值区间和 valuation signal 必须来自 `core/valuation` 的 deterministic engine，不允许由 LLM 凭空估算。
 - 最终 StockResearchReport 必须来自 `core/report.build_stock_report(...)`，由 assembler 生成 report_version、report_hash、valuation、peer_comparison、risk 和 conclusion。
+- 报告生成必须记录 audit trace：feature、valuation、signal、report 四个 stage 均要有 input_hash/output_hash。
 - 不输出交易指令、不输出现金金额、不输出股数。
 
 必须覆盖：

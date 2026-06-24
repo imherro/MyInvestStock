@@ -179,6 +179,7 @@ def build_financial_prompt(item: dict[str, Any], report: dict[str, Any]) -> str:
 - valuation.unit 默认使用 CNY/share。
 - valuation 区间和 valuation signal 必须来自 core/valuation 的 deterministic engine；LLM 只负责解释结论，不允许凭空生成估值数值。
 - 最终 StockResearchReport 必须来自 core/report.build_stock_report(...) 或 scripts/build_research_report.py；不要手写 dict 拼装 valuation、peer_comparison、risk、conclusion。
+- 使用 scripts/build_research_report.py 时必须带 --audit-db data/local/myinveststock.sqlite，或使用 TraceRecorder + record_trace_events 写入 audit_log。
 
 {STOCK_REPORT_SCHEMA_INSTRUCTION}
 

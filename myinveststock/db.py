@@ -184,10 +184,23 @@ def init_db(db_path: Path | str = DB_PATH) -> None:
                 error_message TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                stage TEXT NOT NULL,
+                input_hash TEXT NOT NULL,
+                output_hash TEXT NOT NULL,
+                diff_metrics TEXT NOT NULL DEFAULT '{}',
+                timestamp TEXT NOT NULL,
+                UNIQUE (run_id, stage, input_hash, output_hash)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_trackable_code
                 ON trackable_leaders(code);
             CREATE INDEX IF NOT EXISTS idx_task_queue_status
                 ON task_queue(status, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_audit_log_run_stage
+                ON audit_log(run_id, stage);
             CREATE INDEX IF NOT EXISTS idx_runs_code_date
                 ON stock_research_runs(code, research_date);
             """

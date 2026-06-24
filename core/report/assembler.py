@@ -6,7 +6,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
+from core.observability import TraceRecorder
 from core.schema.stock_report import StockResearchReport
+from core.task.state import compute_task_run_id
 from core.valuation import (
     FundamentalFeatures,
     IntrinsicValueRange,
@@ -200,25 +202,76 @@ def _valuation_confidence(peer_count: int, value_range: IntrinsicValueRange) -> 
     return "medium"
 
 
-def build_stock_report(input_data: Mapping[str, Any]) -> StockResearchReport:
-    features, financial_rows = _features_from_input(input_data)
-    valuation_inputs = _as_mapping(input_data.get("valuation_inputs") or input_data.get("valuation"))
-    peers = _peers_from_input(input_data)
-
+def build_stock_report(input_data: Mapping[str, Any], trace_recorder: TraceRecorder | None = None) -> StockResearchReport:
     stock_code = _safe_str(input_data.get("stock_code") or input_data.get("code"), "000000.SH")
     stock_name = _safe_str(input_data.get("stock_name") or input_data.get("name"), stock_code)
     research_date = _safe_str(input_data.get("research_date"), "1970-01-01")
     task_type = _safe_str(input_data.get("task_type"), "financial")
+    run_id = compute_task_run_id(stock_code, task_type, research_date, "stock_research_report.v1")
+
+    features, financial_rows = _features_from_input(input_data)
+    if trace_recorder is not None:
+        trace_recorder.record(
+            run_id=run_id,
+            stage="feature",
+            input_payload=financial_rows or input_data.get("features") or {},
+            output_payload=features,
+            diff_metrics={
+                "revenue_growth_3y": _round_float(features.revenue_growth_3y),
+                "profit_growth_3y": _round_float(features.profit_growth_3y),
+                "roe_avg": _round_float(features.roe_avg),
+            },
+        )
+
+    valuation_inputs = _as_mapping(input_data.get("valuation_inputs") or input_data.get("valuation"))
+    peers = _peers_from_input(input_data)
 
     stock_pe = _safe_float(valuation_inputs.get("stock_pe") or valuation_inputs.get("pe"))
     peer_result = compare_to_peers(stock_pe=stock_pe, stock_roe=features.roe_avg, peers=peers)
     value_range = _valuation_range(features=features, peer_result=peer_result, valuation_inputs=valuation_inputs)
+    if trace_recorder is not None:
+        trace_recorder.record(
+            run_id=run_id,
+            stage="valuation",
+            input_payload={
+                "features": features,
+                "valuation_inputs": valuation_inputs,
+                "peers": peers,
+            },
+            output_payload={
+                "value_range": value_range,
+                "peer_result": peer_result,
+            },
+            diff_metrics={
+                "pe": _round_float(stock_pe),
+                "pb": _round_float(_safe_float(valuation_inputs.get("pb"))),
+                "intrinsic_value_mid": _round_float(value_range.mid),
+            },
+        )
     signal = build_valuation_signal(
         current_price=_safe_float(valuation_inputs.get("current_price")),
         intrinsic_mid=value_range.mid,
         features=features,
         peer_comparison=peer_result,
     )
+    if trace_recorder is not None:
+        trace_recorder.record(
+            run_id=run_id,
+            stage="signal",
+            input_payload={
+                "current_price": _safe_float(valuation_inputs.get("current_price")),
+                "intrinsic_mid": value_range.mid,
+                "features": features,
+                "peer_result": peer_result,
+            },
+            output_payload=signal,
+            diff_metrics={
+                "undervalued_score": _round_float(signal.undervalued_score),
+                "growth_score": _round_float(signal.growth_score),
+                "quality_score": _round_float(signal.quality_score),
+                "risk_adjusted_score": _round_float(signal.risk_adjusted_score),
+            },
+        )
     conclusion = build_conclusion(signal)
 
     valuation_outputs = {
@@ -336,4 +389,26 @@ def build_stock_report(input_data: Mapping[str, Any]) -> StockResearchReport:
             "LLM is not used during deterministic assembly",
         ],
     }
-    return StockResearchReport(**payload)
+    report = StockResearchReport(**payload)
+    if trace_recorder is not None:
+        trace_recorder.record(
+            run_id=run_id,
+            stage="report",
+            input_payload={
+                "features": features,
+                "valuation_outputs": valuation_outputs,
+                "peer_outputs": peer_outputs,
+                "risk": risk,
+                "conclusion": conclusion,
+            },
+            output_payload=report.model_dump(mode="json"),
+            diff_metrics={
+                "stock_code": stock_code,
+                "report_hash": report.report_hash,
+                "pe": _round_float(stock_pe),
+                "pb": _round_float(_safe_float(valuation_inputs.get("pb"))),
+                "undervalued_score": _round_float(signal.undervalued_score),
+                "risk_adjusted_score": _round_float(signal.risk_adjusted_score),
+            },
+        )
+    return report

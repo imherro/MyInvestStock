@@ -75,6 +75,21 @@ BLOCKED -> FAILED
 - `DONE` -> `complete`
 - `FAILED` / `BLOCKED` -> `blocked`
 
+## 审计日志
+
+`audit_log` 是旁路审计表，不参与任务领取、状态转换或报告计算。
+
+字段：
+
+- `run_id`：对应 `StockResearchReport.run_id`。
+- `stage`：`feature`、`valuation`、`signal`、`report`。
+- `input_hash`：stage 输入快照 hash。
+- `output_hash`：stage 输出快照 hash。
+- `diff_metrics`：用于审计和漂移检测的结构化指标 JSON。
+- `timestamp`：trace 记录时间。
+
+`core/observability.verify_run(conn, run_id)` 校验每个 stage 是否存在且 hash 没有分叉；`detect_basic_drift(conn, run_id)` 检查 PE/PB 极端值和 valuation signal 分布漂移。
+
 ## 核心字段
 
 - `code`：由 `stock_code` 映射到数据库。
@@ -123,6 +138,12 @@ python scripts/build_research_report.py path\to\assembly_input.json
 ```
 
 财务深研可以用 LLM 搜集、解释证据，但最终 JSON 的估值、同业、风险调整分数和结论等级必须由 assembler 生成。
+
+开启审计 trace 时，使用：
+
+```powershell
+python scripts/build_research_report.py --audit-db data\local\myinveststock.sqlite path\to\assembly_input.json
+```
 
 ## 研究频率
 

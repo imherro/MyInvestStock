@@ -24,6 +24,7 @@ MyInvestStock 是一个 A 股个股深研工作台，用来承接上游龙头研
 - `task_queue` 是唯一状态源；`research_queue` 只作为 prompt/projection/UI 表，不保存业务状态。
 - 财务估值的数值区间和 signal 由 `core/valuation` 的确定性估值引擎生成，LLM 只负责解释，不负责计算估值。
 - 财务报告合成由 `core/report` 的确定性 assembler 生成 `StockResearchReport`、`report_version` 和 `report_hash`。
+- 执行 trace 和审计由 `core/observability` 旁路记录，不改变核心报告输出。
 - Web 默认端口固定为 `8016`。
 - 页面 footer 统一加载 `https://invest.okbbc.com/footer.js`。
 - `.env`、本地 SQLite、原始抓取 JSON 和临时产物不提交、不打包给外部审计。
@@ -43,6 +44,7 @@ SQLite:
   task_queue
   research_queue
   stock_research_runs
+  audit_log
         |
         +--> scripts/generate_single_stock_prompt.py
         |       每次领取一条可研究任务
@@ -82,6 +84,16 @@ myinveststock/web.py
 - `report_version` 固定为 `v1.0.0`，`report_hash` 是稳定 sha256，用于回放和审计。
 
 财务估值深研应先收集结构化输入，再调用 assembler 输出最终 JSON；不要让 prompt 自由拼接估值、同业和结论字段。
+
+## 可观测性与审计
+
+`core/observability` 是旁路 trace 层，默认不开启，不参与业务计算。
+
+- `trace.py`：记录 `feature`、`valuation`、`signal`、`report` 四个 stage 的 `input_hash`、`output_hash` 和结构化 `diff_metrics`。
+- `audit.py`：写入 SQLite `audit_log`，提供 `verify_run(run_id)` 和 `detect_basic_drift(run_id)`。
+- `scripts/build_research_report.py --audit-db data/local/myinveststock.sqlite ...` 可以在生成报告时同步写入审计轨迹。
+
+trace 只能观察，不允许改变 `StockResearchReport`、`report_hash` 或估值结果。
 
 ## 自动化设计
 
@@ -214,6 +226,12 @@ python scripts/import_research_run.py path\to\research.json
 python scripts/build_research_report.py path\to\assembly_input.json
 ```
 
+生成报告并写入审计 trace：
+
+```powershell
+python scripts/build_research_report.py --audit-db data\local\myinveststock.sqlite path\to\assembly_input.json
+```
+
 运行项目检查：
 
 ```powershell
@@ -262,6 +280,7 @@ temp/                临时文件和审计打包目录，默认不提交
 - `core/task/state.py`：任务状态机、合法状态转换和 run_id 生成规则。
 - `core/valuation/`：确定性估值特征、模型、同业对标和 signal layer。
 - `core/report/`：确定性报告组装、结论规则和 report_hash。
+- `core/observability/`：旁路 trace、audit_log、reproducibility check 和基础漂移检测。
 - `myinveststock/leader_index.py`：只从 `/api/index` 的 `key_results.primary_output.items` 入队。
 - `myinveststock/db.py`：队列表结构、依赖判断和任务领取逻辑。
 - `myinveststock/web.py`：只读页面和对外 API。
