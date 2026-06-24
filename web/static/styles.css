@@ -215,6 +215,10 @@ h2 {
   border-top: 1px solid var(--line);
 }
 
+.content.section-block {
+  margin: 18px auto;
+}
+
 .section-block p {
   margin: 0;
 }
