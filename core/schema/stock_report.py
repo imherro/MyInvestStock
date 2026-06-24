@@ -55,6 +55,11 @@ class Valuation(StrictSchemaModel):
     method: StrictStr
     confidence: Confidence
     key_assumptions: list[StrictStr] = Field(default_factory=list)
+    engine_version: StrictStr | None = None
+    undervalued_score: StrictFloat | None = Field(default=None, ge=0.0, le=100.0)
+    growth_score: StrictFloat | None = Field(default=None, ge=0.0, le=100.0)
+    quality_score: StrictFloat | None = Field(default=None, ge=0.0, le=100.0)
+    risk_adjusted_score: StrictFloat | None = Field(default=None, ge=0.0, le=100.0)
 
     @model_validator(mode="after")
     def validate_range_order(self) -> Valuation:

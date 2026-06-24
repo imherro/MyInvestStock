@@ -29,7 +29,7 @@ STOCK_REPORT_SCHEMA_INSTRUCTION = """结构化输出要求：
 - research_date 必须使用入口 basis_date。
 - run_id 必须等于 hash(stock_code + task_type + research_date + schema_version)，可省略让导入端自动生成；如果提供错误 run_id 会被拒绝。
 - fundamentals 必须包含 revenue_growth, profit_growth, roe, debt_ratio, revenue_quality, profit_quality, cash_flow_quality, balance_sheet_quality。
-- valuation 必须包含 pe, pb, peg, intrinsic_value_low, intrinsic_value_mid, intrinsic_value_high, unit, method, confidence, key_assumptions。
+- valuation 必须包含 pe, pb, peg, intrinsic_value_low, intrinsic_value_mid, intrinsic_value_high, unit, method, confidence, key_assumptions；可包含 engine_version, undervalued_score, growth_score, quality_score, risk_adjusted_score。
 - peer_comparison 必须包含 industry_rank, competitors, relative_valuation, competitive_position。
 - risk 必须包含 financial_risk, industry_risk, sentiment_risk, invalidation_conditions。
 - conclusion 必须包含 grade, confidence, summary；grade 必须等于 heavy_position_view。
@@ -177,6 +177,7 @@ def build_financial_prompt(item: dict[str, Any], report: dict[str, Any]) -> str:
 - task_type 必须为 financial。
 - valuation.intrinsic_value_low / intrinsic_value_mid / intrinsic_value_high 必须全部为数字，且 low <= mid <= high。
 - valuation.unit 默认使用 CNY/share。
+- valuation 区间和 valuation signal 必须来自 core/valuation 的 deterministic engine；LLM 只负责解释结论，不允许凭空生成估值数值。
 
 {STOCK_REPORT_SCHEMA_INSTRUCTION}
 

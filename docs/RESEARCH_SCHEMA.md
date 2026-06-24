@@ -83,6 +83,7 @@ BLOCKED -> FAILED
 - `valuation_high`：由 `valuation.intrinsic_value_high` 映射。
 - `valuation_method`：由 `valuation.method` 映射。
 - `valuation_confidence`：由 `valuation.confidence` 映射。
+- `valuation.engine_version`、`valuation.undervalued_score`、`valuation.growth_score`、`valuation.quality_score`、`valuation.risk_adjusted_score`：由 `core/valuation` 的确定性估值引擎生成。
 - `industry_position`：行业地位。
 - `competition_landscape`：竞争格局。
 - `upstream_downstream`：上下游公司和议价关系。
@@ -91,6 +92,17 @@ BLOCKED -> FAILED
 - `heavy_position_view`：重仓研究资格标签。
 - `risks_json`：由 `risk.invalidation_conditions` 映射。
 - `raw_json`：保存 `StockResearchReport.model_dump(mode="json")`，不保存未校验原始 dict。
+
+## 确定性估值输出
+
+财务估值深研中的估值数值不应由 LLM 临场生成。数值层由 `core/valuation` 输出：
+
+- `features.py`：财务特征。
+- `models.py`：PE、PB、轻量 DCF 和估值区间组合。
+- `peer.py`：行业中位数和分位排名。
+- `signal.py`：估值、增长、质量和风险调整分数。
+
+LLM 可以解释这些 deterministic output，但不能替代公式计算。
 
 ## 研究频率
 

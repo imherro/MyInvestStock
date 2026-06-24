@@ -22,6 +22,7 @@ MyInvestStock 是一个 A 股个股深研工作台，用来承接上游龙头研
 - 队列任务使用 `core/task/state.py` 的状态机：`PENDING -> RUNNING -> DONE/FAILED/BLOCKED`，失败任务经 `RETRY -> PENDING` 后才能重跑。
 - `run_id` 是幂等真值，由 `stock_code + task_type + research_date + schema_version` 计算，数据库强制唯一。
 - `task_queue` 是唯一状态源；`research_queue` 只作为 prompt/projection/UI 表，不保存业务状态。
+- 财务估值的数值区间和 signal 由 `core/valuation` 的确定性估值引擎生成，LLM 只负责解释，不负责计算估值。
 - Web 默认端口固定为 `8016`。
 - 页面 footer 统一加载 `https://invest.okbbc.com/footer.js`。
 - `.env`、本地 SQLite、原始抓取 JSON 和临时产物不提交、不打包给外部审计。
@@ -56,6 +57,17 @@ myinveststock/web.py
   /api/latest        对外研究成果
   /api/queue         本地队列
 ```
+
+## 确定性估值引擎
+
+`core/valuation` 是非 LLM 的估值信号层，目标是 same input -> same output。
+
+- `features.py`：从结构化财务数据提取 `revenue_growth_3y`、`profit_growth_3y`、`roe_avg`、`gross_margin`、`debt_to_equity`、`fcf_yield`。
+- `models.py`：实现 PE、PB 和轻量 DCF，并组合为 `IntrinsicValueRange`。
+- `peer.py`：计算行业 PE/ROE 中位数和分位排名。
+- `signal.py`：输出 `undervalued_score`、`growth_score`、`quality_score`、`risk_adjusted_score`。
+
+`StockResearchReport.valuation` 可以承接 `engine_version` 和四个 signal 分数，保证估值数值不由 prompt 临场生成。
 
 ## 自动化设计
 
@@ -228,6 +240,7 @@ temp/                临时文件和审计打包目录，默认不提交
 - `docs/RESEARCH_SCHEMA.md`：研究 JSON 入库结构。
 - `core/schema/stock_report.py`：强类型研究报告 schema 和 validation gate。
 - `core/task/state.py`：任务状态机、合法状态转换和 run_id 生成规则。
+- `core/valuation/`：确定性估值特征、模型、同业对标和 signal layer。
 - `myinveststock/leader_index.py`：只从 `/api/index` 的 `key_results.primary_output.items` 入队。
 - `myinveststock/db.py`：队列表结构、依赖判断和任务领取逻辑。
 - `myinveststock/web.py`：只读页面和对外 API。

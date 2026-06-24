@@ -50,6 +50,7 @@
 - financial 任务必须依赖已有 strategic 底稿，可以多次刷新估值和财务结论。
 - strategic 底稿未完成时，不提前领取对应 financial 任务。
 - `run_id` 由 `stock_code + task_type + research_date + schema_version` 计算，数据库唯一，防止重复研究。
+- financial 估值区间和 signal 必须由 `core/valuation` 的确定性估值引擎生成；LLM 只负责解释，不负责计算估值数值。
 - 如果队列为空，汇报队列为空，不生成研究正文。
 
 提示词：
@@ -144,6 +145,7 @@ JSON 必须符合 `core/schema/stock_report.py` 的 `StockResearchReport`：`tas
 - 网络资料只用于补充财务口径、行业数据或管理层表述。
 - 本任务可以多次重复执行，用最新财务、估值和价格数据刷新结论。
 - 本任务专注财务质量、增长质量、估值区间和重仓研究资格，不重复写泛行业故事。
+- 估值区间和 valuation signal 必须来自 `core/valuation` 的 deterministic engine，不允许由 LLM 凭空估算。
 - 不输出交易指令、不输出现金金额、不输出股数。
 
 必须覆盖：
