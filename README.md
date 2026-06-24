@@ -18,6 +18,7 @@ MyInvestStock 是一个 A 股个股深研工作台，用来承接上游龙头研
 - `strategic` 是战略、行业、竞争和长期潜力底稿，默认只做一次。
 - `financial` 是财务质量、增长率、估值区间和价格位置研究，可以随着新数据多次刷新。
 - `financial` 必须依赖已完成的 `strategic` 底稿；战略未完成时不提前领取财务任务。
+- 新研究结果必须符合 `core/schema/stock_report.py` 的 Pydantic schema，入库前强制校验。
 - Web 默认端口固定为 `8016`。
 - 页面 footer 统一加载 `https://invest.okbbc.com/footer.js`。
 - `.env`、本地 SQLite、原始抓取 JSON 和临时产物不提交、不打包给外部审计。
@@ -218,6 +219,7 @@ temp/                临时文件和审计打包目录，默认不提交
 - `docs/AUTOMATION.md`：两步自动化和单股单任务提示词。
 - `docs/ARCHITECTURE.md`：系统数据流和模块边界。
 - `docs/RESEARCH_SCHEMA.md`：研究 JSON 入库结构。
+- `core/schema/stock_report.py`：强类型研究报告 schema 和 validation gate。
 - `myinveststock/leader_index.py`：只从 `/api/index` 的 `key_results.primary_output.items` 入队。
 - `myinveststock/db.py`：队列表结构、依赖判断和任务领取逻辑。
 - `myinveststock/web.py`：只读页面和对外 API。

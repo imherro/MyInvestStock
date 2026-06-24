@@ -66,6 +66,7 @@
 - 网络资料只作为补充证据，必须记录来源、日期和用途。
 - 不输出交易指令，不输出现金金额，不输出股数。
 - “重仓资格”只能是研究标签，例如 不具备、观察、可跟踪、核心仓研究资格、高估暂缓。
+- 所有研究 JSON 必须符合 `core/schema/stock_report.py` 的 `StockResearchReport`，入库前必须通过 Pydantic 校验；禁止输出 schema 以外字段。
 
 完成后：
 - 验证 http://127.0.0.1:8016/api/index 返回 200。
@@ -110,6 +111,7 @@
 战略深研是长期底稿，默认只做一次；除非公司业务结构、行业格局或长期逻辑发生断层变化，不要每日重复生成。
 
 完成后输出结构化 JSON，并通过 `scripts/import_research_run.py` 入库为 task_type='strategic'。战略 JSON 不允许写估值区间字段。
+JSON 必须符合 `core/schema/stock_report.py` 的 `StockResearchReport`：`task_type` 为 `strategic`，`valuation.intrinsic_value_low/mid/high` 均为 `null`，禁止额外字段。
 ```
 
 ## 个股财务估值深研提示词
@@ -151,6 +153,7 @@
 - 财务证伪条件：什么财务或估值数据出现后说明判断错了。
 
 完成后输出结构化 JSON，并通过 `scripts/import_research_run.py` 入库为 task_type='financial'，保证 /stocks/{code} 能看到估值区间历史叠加。
+JSON 必须符合 `core/schema/stock_report.py` 的 `StockResearchReport`：`task_type` 为 `financial`，`valuation.intrinsic_value_low/mid/high` 必须全部为数字且 `low <= mid <= high`，禁止额外字段。
 ```
 
 ## 建议节奏

@@ -20,6 +20,23 @@ from .db import (
 STOCK_CODE_RE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
 
 
+STOCK_REPORT_SCHEMA_INSTRUCTION = """结构化输出要求：
+- 最终只输出一个 JSON object，不要输出 Markdown 包裹。
+- JSON 必须符合 core/schema/stock_report.py 中 StockResearchReport。
+- 顶层字段固定为：schema_version, run_id, stock_code, stock_name, source_report_id, task_type, research_date, status, title, summary, industry_position, competition_landscape, upstream_downstream, annual_growth, multi_bagger_potential, heavy_position_view, fundamentals, valuation, peer_comparison, risk, conclusion, evidence, assumptions。
+- 禁止输出 schema 以外的额外字段；禁止把未定义内容塞进自由 dict。
+- stock_code 使用唯一研究对象代码，stock_name 使用唯一研究对象名称，source_report_id 使用入口 report_id。
+- fundamentals 必须包含 revenue_growth, profit_growth, roe, debt_ratio, revenue_quality, profit_quality, cash_flow_quality, balance_sheet_quality。
+- valuation 必须包含 pe, pb, peg, intrinsic_value_low, intrinsic_value_mid, intrinsic_value_high, unit, method, confidence, key_assumptions。
+- peer_comparison 必须包含 industry_rank, competitors, relative_valuation, competitive_position。
+- risk 必须包含 financial_risk, industry_risk, sentiment_risk, invalidation_conditions。
+- conclusion 必须包含 grade, confidence, summary；grade 必须等于 heavy_position_view。
+- evidence 是对象数组，每项必须包含 source, date, url, purpose, detail。
+- assumptions 是字符串数组。
+- heavy_position_view/grade 只能是：不具备、观察、可跟踪、核心仓研究资格、高估暂缓。
+- status 只能是 complete、draft、blocked；confidence 只能是 low、medium、high。"""
+
+
 def fetch_index(url: str = LEADER_INDEX_URL, timeout: int = 30) -> dict[str, Any]:
     request = urllib.request.Request(
         url,
@@ -105,6 +122,13 @@ def build_strategic_prompt(item: dict[str, Any], report: dict[str, Any]) -> str:
 
 战略深研是长期底稿，默认只做一次；除非公司业务结构、行业格局或长期逻辑发生断层变化，不要每日重复生成。
 
+战略深研 schema 规则：
+- task_type 必须为 strategic。
+- valuation.intrinsic_value_low / intrinsic_value_mid / intrinsic_value_high 必须为 null。
+- valuation.method 写“strategic-only”，valuation.confidence 写 low/medium/high。
+
+{STOCK_REPORT_SCHEMA_INSTRUCTION}
+
 完成后将 task_type='strategic' 的结构化结果写入 stock_research_runs。"""
 
 
@@ -146,6 +170,13 @@ def build_financial_prompt(item: dict[str, Any], report: dict[str, Any]) -> str:
 - 五倍/十倍潜力校验：用财务和估值条件验证战略深研中的潜力判断。
 - 重仓资格：只能写研究标签，如 不具备、观察、可跟踪、核心仓研究资格、高估暂缓。
 - 财务证伪条件：什么财务或估值数据出现后说明判断错了。
+
+财务估值深研 schema 规则：
+- task_type 必须为 financial。
+- valuation.intrinsic_value_low / intrinsic_value_mid / intrinsic_value_high 必须全部为数字，且 low <= mid <= high。
+- valuation.unit 默认使用 CNY/share。
+
+{STOCK_REPORT_SCHEMA_INSTRUCTION}
 
 完成后将 task_type='financial' 的结构化结果写入 stock_research_runs，并保证 /stocks/{code} 能看到估值区间历史叠加。"""
 

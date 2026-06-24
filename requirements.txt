@@ -1,2 +1,1 @@
-# First version uses the Python standard library only.
-# Future single-stock financial collection may add tushare, pandas, baostock, yfinance, or fredapi.
+pydantic>=2,<3

@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from core.schema.stock_report import StockResearchReport
+
 from .config import DB_PATH
 
 
@@ -443,34 +445,42 @@ def valuation_runs(conn: sqlite3.Connection, code: str) -> list[sqlite3.Row]:
     )
 
 
-def insert_research_run(conn: sqlite3.Connection, run: dict[str, Any]) -> int:
+def insert_research_run(conn: sqlite3.Connection, report: StockResearchReport) -> int:
+    if not isinstance(report, StockResearchReport):
+        run_id = report.get("run_id", "unknown") if isinstance(report, dict) else "unknown"
+        stock_code = report.get("stock_code") or report.get("code", "unknown") if isinstance(report, dict) else "unknown"
+        raise TypeError(
+            "insert_research_run requires a validated StockResearchReport "
+            f"(run_id={run_id}, stock_code={stock_code})"
+        )
     now = utc_now()
+    payload = report.model_dump(mode="json")
     fields = {
-        "code": run["code"],
-        "name": run["name"],
-        "source_report_id": run.get("source_report_id"),
-        "task_type": run.get("task_type") or "combined",
-        "research_date": run["research_date"],
-        "created_at": run.get("created_at") or now,
-        "status": run.get("status") or "complete",
-        "title": run.get("title"),
-        "summary": run.get("summary"),
-        "valuation_low": run.get("valuation_low"),
-        "valuation_mid": run.get("valuation_mid"),
-        "valuation_high": run.get("valuation_high"),
-        "valuation_unit": run.get("valuation_unit") or "CNY/share",
-        "valuation_method": run.get("valuation_method"),
-        "valuation_confidence": run.get("valuation_confidence"),
-        "industry_position": run.get("industry_position"),
-        "competition_landscape": run.get("competition_landscape"),
-        "upstream_downstream": run.get("upstream_downstream"),
-        "annual_growth": run.get("annual_growth"),
-        "multi_bagger_potential": run.get("multi_bagger_potential"),
-        "heavy_position_view": run.get("heavy_position_view"),
-        "evidence_json": _json(run.get("evidence")),
-        "assumptions_json": _json(run.get("assumptions")),
-        "risks_json": _json(run.get("risks")),
-        "raw_json": _json(run),
+        "code": report.stock_code,
+        "name": report.stock_name,
+        "source_report_id": report.source_report_id,
+        "task_type": report.task_type,
+        "research_date": report.research_date,
+        "created_at": now,
+        "status": report.status,
+        "title": report.title,
+        "summary": report.summary,
+        "valuation_low": report.valuation.intrinsic_value_low,
+        "valuation_mid": report.valuation.intrinsic_value_mid,
+        "valuation_high": report.valuation.intrinsic_value_high,
+        "valuation_unit": report.valuation.unit,
+        "valuation_method": report.valuation.method,
+        "valuation_confidence": report.valuation.confidence,
+        "industry_position": report.industry_position,
+        "competition_landscape": report.competition_landscape,
+        "upstream_downstream": report.upstream_downstream,
+        "annual_growth": report.annual_growth,
+        "multi_bagger_potential": report.multi_bagger_potential,
+        "heavy_position_view": report.heavy_position_view,
+        "evidence_json": _json(payload["evidence"]),
+        "assumptions_json": _json(payload["assumptions"]),
+        "risks_json": _json(report.risk.invalidation_conditions),
+        "raw_json": _json(payload),
     }
     columns = ", ".join(fields.keys())
     placeholders = ", ".join("?" for _ in fields)
