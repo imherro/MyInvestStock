@@ -9,7 +9,7 @@
 - 竞争格局
 - 上下游公司
 - 年增长率
-- 五倍/十倍潜力
+- 数倍潜力
 - 是否具备重仓研究资格
 - 个股历史研究记录
 
@@ -24,10 +24,8 @@ flowchart LR
   B --> E["SQLite: research_queue"]
   D --> U["upstream_signal: Leader 个股信号 + Theme 主线环境"]
   E --> F["generate_single_stock_prompt.py"]
-  F --> G1["Codex 个股战略深研"]
-  F --> G2["Codex 个股财务估值深研"]
-  G1 --> H["SQLite: stock_research_runs"]
-  G2 --> H
+  F --> G["Codex 个股完整深研"]
+  G --> H["SQLite: stock_research_runs"]
   H --> I["8016 Web 个股页"]
   D --> I
   U --> I
@@ -40,7 +38,8 @@ flowchart LR
 - `myinveststock/db.py`：SQLite schema 和读写函数。
 - `myinveststock/web.py`：只读 Web 页面和 JSON API。
 - `scripts/ingest_index.py`：每日发现队列。
-- `scripts/generate_single_stock_prompt.py`：一次只生成一只股票、一个阶段的深研提示词。
+- `scripts/generate_single_stock_prompt.py`：一次只生成一只股票的一条完整深研提示词。
+- `scripts/monitor_research_triggers.py`：监测是否需要重新做完整个股深研。
 - `scripts/run_web.py`：启动 8016 本地 Web。
 
 ## 上游主线信号边界
@@ -80,7 +79,17 @@ MyInvestStock 的确定性估值只回答“财务安全边际是否足够”。
 
 Web 侧不写入数据库，所有入库都由脚本或自动化任务完成。
 
-## 两阶段研究
+## 单一完整深研
 
-- `strategic`：战略深研，关注行业空间、竞争格局、上下游、长期壁垒和五倍/十倍潜力。默认只做一次，除非长期逻辑发生重大变化。
-- `financial`：财务估值深研，关注财务质量、增长率、估值区间、当前价格位置和重仓研究资格。可随财报、价格和主线变化多次刷新。
+新任务只保留 `stock_research`。每次触发都输出完整个股深研，覆盖行业空间、竞争格局、上下游、长期壁垒、数倍潜力、财务质量、增长率、估值区间、当前价格位置和重仓研究资格。
+
+`trigger_reason` 记录本次为什么重研，例如：
+
+- 新进入可跟踪龙头
+- 手工请求研究
+- 财报更新
+- 重大事件
+- 估值中枢变化
+- 定期复核
+
+数据库初始化会清理旧任务类型和旧估值记录，避免页面继续展示不兼容历史。

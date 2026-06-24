@@ -2,22 +2,24 @@
 
 ## 任务拆分
 
-深研必须一次只研究一只股票。个股研究再拆成战略和财务两类：
+新系统只保留一种研究任务：
 
-1. `MyInvestStock 推荐龙头读取入队`
-2. `MyInvestStock 个股深研队列消化`
-3. `MyInvestStock 个股战略深研 {code} {name}`
-4. `MyInvestStock 个股财务估值深研 {code} {name}`
+```text
+MyInvestStock 个股深研 {code} {name}
+```
+
+`task_type` 固定为 `stock_research`。不再生成旧的两阶段任务；数据库初始化会清理旧队列、旧任务状态和旧研究记录。
 
 ## 推荐龙头读取入队自动化
 
-用途：每天在市场研究、主线研究、龙头研究完成之后，读取 Leader `/api/index` 的可跟踪龙头，并同步 Theme `/api/index` 的主线环境快照，更新今日待研队列，不做深研。
+用途：每天在市场研究、主线研究、龙头研究完成之后，读取 Leader `/api/index` 的可跟踪龙头，并同步 Theme `/api/index` 的主线环境快照。
 
 规则：
 
-- 每只股票如果没有战略底稿，生成一条战略深研任务。
-- 每次进入 `A可跟踪龙头` 时都可以生成财务估值深研任务。
-- 战略深研默认只做一次；财务估值深研可以多次刷新。
+- 只使用 `https://leader.okbbc.com/api/index -> key_results.primary_output.items` 作为今日股票入口。
+- 同步读取 `https://theme.okbbc.com/api/index -> mainline_ranking / legacy_theme_ranking / market` 作为主线环境。
+- 新股票只生成一条 `stock_research` 任务，`trigger_reason=新进入可跟踪龙头`。
+- 已有 `stock_research` 报告或待处理队列的股票不重复入队。
 - 本任务只做入队和状态汇总，不领取个股研究任务。
 
 提示词：
@@ -25,179 +27,140 @@
 ```text
 执行 MyInvestStock 推荐龙头读取入队。
 
-触发前提：这是市场研究、主线研究、龙头研究完成之后的下游入口更新任务。先检查 https://leader.okbbc.com/api/index 是否已经更新完成。只接受 Leader /api/index 中 report.basis_date 已经是最新完整数据可用的交易日，且 key_results.primary_output.items 非空的结果。如果 Leader /api/index 未更新、为空、请求失败，或 report_id 与上一轮完全相同且本地队列已处理过，则停止并汇报原因。
+先检查 https://leader.okbbc.com/api/index 是否已经更新完成。只接受 Leader /api/index 中 report.basis_date 已经是最新完整数据可用的交易日，且 key_results.primary_output.items 非空的结果。
 
-只使用 https://leader.okbbc.com/api/index 的 key_results.primary_output.items 作为今日 A可跟踪龙头研究对象。禁止从 /api/latest 的 themes[].stock_leaders 扩展股票池。
+只使用 key_results.primary_output.items 作为今日 A可跟踪龙头研究对象。禁止从 /api/latest 的 themes[].stock_leaders 扩展股票池。
 
-同时读取 https://theme.okbbc.com/api/index，只引用 mainline_ranking、legacy_theme_ranking 和 market 作为主线环境快照。Theme 只提供市场状态、主线强度、生命周期、周期阶段、ETF/板块趋势、拥挤度和风险偏好背景，不扩展股票池，不覆盖 Leader 的个股龙头证据。
+同时读取 https://theme.okbbc.com/api/index，只引用 mainline_ranking、legacy_theme_ranking 和 market 作为主线环境快照。
 
-运行 python scripts/ingest_index.py 更新本地 SQLite 队列；脚本会同步保存 Leader 快照和 Theme 主线环境快照。只做入队和状态汇总，不领取 research_queue 任务，不生成个股深研正文，不调用个股战略或财务深研提示词。
+运行 python scripts/ingest_index.py 更新本地 SQLite 队列。新任务统一为 task_type='stock_research'，trigger_reason='新进入可跟踪龙头'。
 
-随后运行 python scripts/update_stock_prices.py --all-system 刷新系统内相关股票的近期 K 线缓存，覆盖最新可跟踪龙头、历史可跟踪龙头、研究队列和已有研究记录。K 线只用于个股页“合理估值区间历史”的价格参照层，不参与估值计算，不改变研究结论。
+随后运行 python scripts/update_stock_prices.py --all-system 刷新系统内相关股票的近期 K 线缓存。
 
-完成后验证 http://127.0.0.1:8016/api/index 和 http://127.0.0.1:8016/api/latest，汇报 leader report_id、theme report_id、basis_date、入库股票数量、股票代码和名称，以及生成或保持的 strategic / financial 队列数量。不要输出 .env 内容，不要提交 .env、data/local/*.sqlite、data/raw/*.json。
+完成后验证 http://127.0.0.1:8016/api/index 和 http://127.0.0.1:8016/api/latest，汇报 leader report_id、theme report_id、basis_date、入库股票数量、股票代码和名称，以及生成或保持的 stock_research 队列数量。不要输出 .env 内容，不要提交 .env、data/local/*.sqlite、data/raw/*.json。
+```
+
+## 个股重研触发监测自动化
+
+用途：每日检查是否需要重新做完整个股深研。它只判断是否入队，不直接研究。
+
+当前已落地的触发：
+
+- 没有任何 `stock_research` 报告：`新进入可跟踪龙头`
+- 当前价格明显偏离上一版合理估值区间：`估值中枢变化`
+
+后续可接入同一字段的触发：
+
+- 财报更新
+- 重大事件
+- 龙头证据变化
+- 主线阶段明显变化
+- 定期复核
+
+命令：
+
+```powershell
+python scripts/monitor_research_triggers.py
+```
+
+只看不入队：
+
+```powershell
+python scripts/monitor_research_triggers.py --dry-run
 ```
 
 ## 个股深研队列消化自动化
 
-用途：高频运行，持续消化本地待研究队列。每次运行只处理一条任务，处理完即结束；靠下一次自动化继续领取下一条任务。
+用途：高频运行，持续消化本地待研究队列。每次运行只处理一条任务，处理完即结束。
 
 规则：
 
 - 只从本地 `research_queue` 领取 pending 任务，不重新扩展股票池。
-- 队列来源可以是 `可跟踪龙头` 或 `/research?stock={code}` 的 `其他请求`，但领取和执行规则完全相同。
-- 领取任务时把状态标记为 `in_progress`，避免高频自动化重复处理同一项。
-- 同时把系统级 `task_queue` 状态从 `PENDING` 切到 `RUNNING`；入库完成后切到 `DONE`。
-- `RUNNING` 超过 30 分钟会恢复为 `FAILED`，重新入队时经 `RETRY` 回到 `PENDING`。
-- `task_queue` 是唯一状态源；`research_queue` 只保存 prompt/projection/UI 字段，禁止写业务状态。
-- 每次只研究一只股票、一个任务类型。
-- strategic 任务只做战略和竞争研究，不写估值区间。
-- financial 任务必须依赖已有 strategic 底稿，可以多次刷新财务输入和确定性估值报告。
-- strategic 底稿未完成时，不提前领取对应 financial 任务。
-- 龙头确认只引用 MyInvestLeader `/api/index` 已入库的个股信号；主线强度、生命周期、周期阶段、ETF/板块趋势、拥挤度和风险偏好只引用 MyInvestTheme `/api/index` 已入库的主线环境。
-- financial 的 `高估暂缓` 只代表财务安全边际不足，最终页面用上游主线信号和财务安全边际矩阵解释参与类型。
-- `run_id` 由 `stock_code + task_type + research_date + schema_version` 计算，数据库唯一，防止重复研究。
-- financial 估值区间和 signal 必须由 `core/valuation` 的确定性估值引擎生成；LLM 只负责构建 assembly_input 和解释，不负责计算估值数值。
-- financial 最终报告必须由 `core/report.build_stock_report(...)` 或 `scripts/build_research_report.py` 生成，禁止手写 dict 拼装最终结构。
-- financial 生成报告时必须开启旁路 trace，使用 `scripts/build_research_report.py --audit-db data/local/myinveststock.sqlite ...` 或等价的 `TraceRecorder + record_trace_events`。
-- 如果队列为空，汇报队列为空，不生成研究正文。
+- 每次只研究一只股票。
+- 每条任务的 `task_type` 必须是 `stock_research`。
+- `trigger_reason` 只解释本次为什么重研，不拆分不同流程。
+- 合理估值区间和 valuation signal 必须由 `core/valuation` 的确定性估值引擎生成。
+- 最终报告必须由 `core/report.build_stock_report(...)` 或 `scripts/build_research_report.py` 生成。
+- LLM 只负责构建结构化输入和解释，不能重新计算估值或评分。
+- 所有研究 JSON 必须符合 `core/schema/stock_report.py` 的 `StockResearchReport`。
 
 提示词：
 
 ```text
 执行 MyInvestStock 个股深研队列消化。
 
-核心原则：每次自动化运行只处理一条 pending 队列任务，只研究一只股票。不要一次研究多只股票，不要在一个提示词里混合多个股票。不要重新扩展股票池，不要从上游 /api/latest 或其他候选矩阵添加股票。
+核心原则：每次自动化运行只处理一条 pending 队列任务，只研究一只股票。不要一次研究多只股票，不要重新扩展股票池。
 
 执行步骤：
-1. 在本地队列中领取下一条 pending 任务，优先使用 python scripts/generate_single_stock_prompt.py --next --claim 生成本次唯一研究提示词，并把任务标记为 in_progress。
+1. 使用 python scripts/generate_single_stock_prompt.py --next --claim 领取下一条 pending 任务。
 2. 如果没有待研究任务，验证 http://127.0.0.1:8016/api/index 和 http://127.0.0.1:8016/api/latest 可用后，汇报“队列为空”，本次结束。
-3. 如果领取到 strategic 任务：只研究这一只股票的行业位置、市场空间、竞争格局、上下游、战略壁垒、五倍/十倍潜力和战略证伪条件；不写估值区间，不写买卖建议；输出 task_type='strategic' 的结构化 JSON，并通过 scripts/import_research_run.py 入库。
-4. 如果领取到 financial 任务：先确认该股票已有 task_type='strategic' 的战略底稿；如果没有战略底稿，把该 financial 任务标记为 blocked，并停止；如果有战略底稿，只收集和整理财务、估值模型输入、同业样本、风险信号和证据，形成结构化 assembly_input；再通过 core/report.build_stock_report(...) 或 scripts/build_research_report.py 生成 task_type='financial' 的最终 JSON，并写入 audit_log trace，然后通过 scripts/import_research_run.py 入库。不要手写最终 StockResearchReport。
+3. 如果领取到任务，只研究这一只股票，输出完整个股深研结构化输入。
+4. 运行 scripts/build_research_report.py 生成最终 StockResearchReport。
+5. 运行 scripts/import_research_run.py 入库。
 
 数据原则：
 - Tushare 是 A 股结构化主源，使用本地 .env，但不要输出任何 token。
-- 个股页 K 线缓存由 `python scripts/update_stock_prices.py --all-system` 或 `--code {code}` 刷新，只作为价格参照层。
+- Leader 只提供个股入口和龙头证据。
+- Theme 只提供主线环境。
 - 网络资料只作为补充证据，必须记录来源、日期和用途。
 - 不输出交易指令，不输出现金金额，不输出股数。
 - “重仓资格”只能是研究标签，例如 不具备、观察、可跟踪、核心仓研究资格、高估暂缓。
-- 所有研究 JSON 必须符合 `core/schema/stock_report.py` 的 `StockResearchReport`，入库前必须通过 Pydantic 校验；禁止输出 schema 以外字段。
 
 完成后：
 - 验证 http://127.0.0.1:8016/api/index 返回 200。
 - 验证 http://127.0.0.1:8016/api/latest 返回 200。
-- 汇报本次处理的任务类型、股票代码、股票名称、入库状态、主要结论摘要。
+- 汇报本次处理的股票代码、股票名称、触发原因、入库状态、主要结论摘要。
 - 不要提交 .env、data/local/*.sqlite、data/raw/*.json。
 ```
 
-## 个股战略深研提示词
-
-用途：一次只研究一只股票的战略、行业、竞争和长期潜力，并把结果作为长期底稿入库。
+## 个股完整深研提示词
 
 ```text
-在 C:\Users\kunpeng\Documents\MyInvestStock 中执行个股战略深研。
+在 C:\Users\kunpeng\Documents\MyInvestStock 中执行个股完整深研。
 
 唯一研究对象：{code} {name}。
+本次触发原因：{trigger_reason}。
 
 入口信息：
-- 数据入口：https://leader.okbbc.com/api/index
-- 入口路径：key_results.primary_output.items
+- 个股入口：https://leader.okbbc.com/api/index
+- 个股入口路径：key_results.primary_output.items
 - 主线环境入口：https://theme.okbbc.com/api/index
 - 主线环境路径：mainline_ranking / legacy_theme_ranking / market
 - report_id：{report_id}
+- theme_report_id：{theme_report_id}
 - basis_date：{basis_date}
 - 主题：{theme}
 
 硬约束：
-- 只研究这一只股票，禁止同时研究其他 A可跟踪龙头。
-- 先读取 /api/index，只使用 key_results.primary_output.items 中匹配 {code} 的记录作为入口。
-- 再读取 Theme /api/index，只使用 mainline_ranking、legacy_theme_ranking 和 market 中与“{theme}”匹配的主线环境字段。
-- 可使用 stock_deep_research.stocks 中匹配 {code} 的记录作为已有基础材料。
-- 本任务只做战略、行业、竞争和长期潜力研究，不给最终估值区间。
-- 龙头确认只引用 MyInvestLeader 入库信号；主线强度、生命周期、周期阶段、ETF/板块趋势、拥挤度和风险偏好只引用 MyInvestTheme 入库信号。
-- 不重新生成主线结论，不用网络资料覆盖 Theme 的主线判断；只解释这些主线环境对该股票战略研究的含义。
-- 网络资料可作补充证据，但要记录来源和日期。
-- 不输出交易指令、不输出现金金额、不输出股数。
+- 只研究这一只股票。
+- task_type 固定为 stock_research。
+- 先读取上一版 stock_research 报告；如果存在，说明哪些结论改变、哪些没有改变。
+- 龙头确认只引用 MyInvestLeader 入库信号。
+- 主线强度、生命周期、周期阶段、ETF/板块趋势、拥挤度和风险偏好只引用 MyInvestTheme 入库信号。
+- 合理估值区间和评分必须来自确定性估值流水线。
+- LLM 不得手写最终 StockResearchReport。
+- 不输出交易指令、现金金额或股数。
 
 必须覆盖：
-- 行业位置：公司所处细分赛道、产业链环节、国内/全球地位。
-- 市场空间：当前空间、未来 3-5 年扩容逻辑、政策或技术驱动。
-- 竞争格局：直接竞争者、替代者、潜在进入者、行业集中度变化。
-- 上下游公司：关键供应商、客户、平台、渠道和议价关系。
-- 战略壁垒：技术、品牌、渠道、成本、客户锁定、牌照或生态。
-- 五倍/十倍潜力：只判断战略条件，不用股价目标代替逻辑。
-- 战略证伪条件：什么行业或竞争数据出现后说明长期逻辑错了。
-
-战略深研是长期底稿，默认只做一次；除非公司业务结构、行业格局或长期逻辑发生断层变化，不要每日重复生成。
-
-完成后输出结构化 JSON，并通过 `scripts/import_research_run.py` 入库为 task_type='strategic'。战略 JSON 不允许写估值区间字段。
-JSON 必须符合 `core/schema/stock_report.py` 的 `StockResearchReport`：`task_type` 为 `strategic`，`valuation.intrinsic_value_low/mid/high` 均为 `null`，禁止额外字段。
-```
-
-## 个股财务估值深研输入构建提示词
-
-用途：一次只研究一只股票的财务结构化输入，并把确定性系统生成的估值区间叠加入库。
-
-```text
-在 C:\Users\kunpeng\Documents\MyInvestStock 中执行个股财务估值深研输入构建。
-
-唯一研究对象：{code} {name}。
-
-入口信息：
-- 数据入口：https://leader.okbbc.com/api/index
-- 入口路径：key_results.primary_output.items
-- 主线环境入口：https://theme.okbbc.com/api/index
-- 主线环境路径：mainline_ranking / legacy_theme_ranking / market
-- report_id：{report_id}
-- basis_date：{basis_date}
-- 主题：{theme}
-
-前置依赖：
-- 先读取本地 stock_research_runs 中 {code} 的 task_type='strategic' 最新记录。
-- 如果战略深研不存在，先停止并把本任务标记为 blocked，不要跳过前置依赖。
-
-硬约束：
-- 只研究这一只股票，禁止同时研究其他 A可跟踪龙头。
-- Tushare 是 A 股财务、行情、估值结构化主源。
-- 网络资料只用于补充财务口径、行业数据或管理层表述。
-- 本任务可以多次重复执行，用最新财务、估值和价格数据刷新结论。
-- 本任务只构建 deterministic report 所需的 assembly_input，不直接生成最终 StockResearchReport。
-- LLM 只能负责搜集、清洗、归一化输入和解释脚本输出；不能重新计算估值，不能给出新的 grade。
-- 估值区间和 valuation signal 必须来自 `core/valuation` 的 deterministic engine，不允许由 LLM 凭空估算。
-- 最终 StockResearchReport 必须来自 `core/report.build_stock_report(...)`，由 assembler 生成 report_version、report_hash、valuation、peer_comparison、risk 和 conclusion。
-- 报告生成必须记录 audit trace：feature、valuation、signal、report 四个 stage 均要有 input_hash/output_hash。
-- 龙头确认只引用 MyInvestLeader 入库信号；主线强度、生命周期、周期阶段、ETF/板块趋势、拥挤度和风险偏好只引用 MyInvestTheme 入库信号，并说明财务安全边际与主线跟踪价值的区别。
-- 不重新判断主线强弱，不用网络资料覆盖 Theme 的主线环境；财务结论必须区分“主线跟踪价值”和“财务安全边际”。
-- 不输出交易指令、不输出现金金额、不输出股数。
-
-必须构建 assembly_input：
-- 财务输入：收入、利润、毛利率、ROE、现金流、负债、market_cap 等结构化字段。
-- 估值输入：current_price, stock_pe/pe, pb, eps, book_value_per_share, industry_pb, fcf_per_share, weights 等模型输入。
-- 同业输入：同业 stock_code、pe、roe 和样本选择理由。
-- 风险输入：financial_risk、industry_risk、sentiment_risk、invalidation_conditions。
-- 解释性输入：行业地位、竞争格局、上下游、年增长率、五倍/十倍潜力校验可以作为文字输入，但不允许覆盖系统最终结论。
+- 行业位置
+- 竞争格局
+- 上下游公司
+- 财务质量
+- 年增长率
+- 合理估值区间
+- 数倍潜力
+- 重仓研究资格
+- 风险与证伪条件
+- 本次相对上一版的变化
 
 执行流程：
-1. 收集 Tushare 和必要网络补充资料，形成 assembly_input JSON。
-2. 将 assembly_input 写入 temp/assembly_inputs/{code}_financial_{basis_date}.json。
-3. 运行 python scripts/build_research_report.py --audit-db data/local/myinveststock.sqlite temp/assembly_inputs/{code}_financial_{basis_date}.json > temp/reports/{code}_financial_{basis_date}.json。
-4. 用 python scripts/import_research_run.py temp/reports/{code}_financial_{basis_date}.json 入库。
-5. 导入成功后，汇报 run_id、report_hash、audit_log stage 覆盖、verify_run 结果和系统生成的主要结论摘要。
+1. 构建 stock_research assembly_input。
+2. 将 assembly_input 写入 temp/assembly_inputs/{code}_stock_research_{basis_date}.json。
+3. 运行 python scripts/build_research_report.py --audit-db data/local/myinveststock.sqlite temp/assembly_inputs/{code}_stock_research_{basis_date}.json > temp/reports/{code}_stock_research_{basis_date}.json。
+4. 用 python scripts/import_research_run.py temp/reports/{code}_stock_research_{basis_date}.json 入库。
 ```
 
-## 建议节奏
-
-每日主线龙头更新后：
-
-1. 运行 `MyInvestStock 推荐龙头读取入队`，只更新队列。
-2. `MyInvestStock 个股深研队列消化` 高频运行，每次只领取一条任务。
-3. 如果没有战略底稿，先做战略深研。
-4. 战略底稿已存在后，多次做财务估值深研。
-5. 研究完一条就结束，下一次自动化再领取下一条，直到队列为空。
-
 ## 报告解释器提示词
-
-用途：把已经入库或已生成的 `StockResearchReport` 翻译成人类可读解释。解释器不参与计算。
 
 ```text
 你是 A 股研究报告解释器。

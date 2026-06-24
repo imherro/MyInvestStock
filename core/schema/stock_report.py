@@ -12,7 +12,7 @@ STOCK_CODE_RE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
-TaskType = Literal["strategic", "financial"]
+TaskType = Literal["stock_research"]
 RunStatus = Literal["complete", "draft", "blocked"]
 Confidence = Literal["low", "medium", "high"]
 HeavyPositionView = Literal["不具备", "观察", "可跟踪", "核心仓研究资格", "高估暂缓"]
@@ -104,6 +104,7 @@ class StockResearchReport(StrictSchemaModel):
     source_report_id: StrictStr | None = None
     task_type: TaskType
     research_date: StrictStr
+    trigger_reason: StrictStr | None = None
     status: RunStatus = "complete"
     title: StrictStr
     summary: StrictStr
@@ -138,10 +139,8 @@ class StockResearchReport(StrictSchemaModel):
             self.valuation.intrinsic_value_high,
         )
         has_range = all(value is not None for value in valuation_fields)
-        if self.task_type == "strategic" and has_range:
-            raise ValueError("strategic research must not write valuation range")
-        if self.task_type == "financial" and not has_range:
-            raise ValueError("financial research must include a complete valuation range")
+        if not has_range:
+            raise ValueError("stock_research must include a complete valuation range")
 
         expected_run_id = compute_task_run_id(self.stock_code, self.task_type, self.research_date, self.schema_version)
         if self.run_id is None:

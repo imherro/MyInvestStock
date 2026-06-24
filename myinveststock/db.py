@@ -13,8 +13,13 @@ from core.task.state import TaskStatus, compute_task_id, compute_task_run_id, va
 from .config import DB_PATH
 
 REPORT_SCHEMA_VERSION = "stock_research_report.v1"
+TASK_TYPE_STOCK_RESEARCH = "stock_research"
 QUEUE_SOURCE_TRACKABLE = "trackable_leader"
 QUEUE_SOURCE_REQUEST = "manual_request"
+TRIGGER_TRACKABLE_LEADER = "新进入可跟踪龙头"
+TRIGGER_MANUAL_REQUEST = "手工请求研究"
+TRIGGER_PRICE_DEVIATION = "估值中枢变化"
+TRIGGER_PERIODIC_REVIEW = "定期复核"
 
 
 def utc_now() -> str:
@@ -53,6 +58,7 @@ def _create_research_queue_projection(conn: sqlite3.Connection, table_name: str 
             task_id TEXT,
             run_id TEXT,
             depends_on_task_type TEXT,
+            trigger_reason TEXT,
             source_type TEXT NOT NULL DEFAULT 'trackable_leader',
             source_detail TEXT,
             task_keyword TEXT NOT NULL,
@@ -71,6 +77,7 @@ def _migrate_research_queue_projection(conn: sqlite3.Connection) -> None:
     if "status" not in columns:
         _ensure_column(conn, "research_queue", "task_id", "TEXT")
         _ensure_column(conn, "research_queue", "run_id", "TEXT")
+        _ensure_column(conn, "research_queue", "trigger_reason", "TEXT")
         _ensure_column(conn, "research_queue", "source_type", "TEXT NOT NULL DEFAULT 'trackable_leader'")
         _ensure_column(conn, "research_queue", "source_detail", "TEXT")
         return
@@ -91,6 +98,7 @@ def _migrate_research_queue_projection(conn: sqlite3.Connection) -> None:
         "task_id",
         "run_id",
         "depends_on_task_type",
+        "trigger_reason",
         "source_type",
         "source_detail",
         "task_keyword",
@@ -105,6 +113,8 @@ def _migrate_research_queue_projection(conn: sqlite3.Connection) -> None:
             select_exprs.append(column)
         elif column == "source_type":
             select_exprs.append("'trackable_leader'")
+        elif column == "trigger_reason":
+            select_exprs.append("NULL")
         else:
             select_exprs.append("NULL")
     conn.execute(
@@ -181,6 +191,7 @@ def init_db(db_path: Path | str = DB_PATH) -> None:
                 annual_growth TEXT,
                 multi_bagger_potential TEXT,
                 heavy_position_view TEXT,
+                trigger_reason TEXT,
                 evidence_json TEXT,
                 assumptions_json TEXT,
                 risks_json TEXT,
@@ -239,6 +250,8 @@ def init_db(db_path: Path | str = DB_PATH) -> None:
         )
         _create_research_queue_projection(conn)
         _migrate_research_queue_projection(conn)
+        _ensure_column(conn, "stock_research_runs", "trigger_reason", "TEXT")
+        _purge_legacy_research_state(conn)
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_queue_run_id
@@ -264,6 +277,12 @@ def queue_source_label(source_type: object) -> str:
     if source_type == QUEUE_SOURCE_REQUEST:
         return "其他请求"
     return str(source_type or "未知来源")
+
+
+def _purge_legacy_research_state(conn: sqlite3.Connection) -> None:
+    conn.execute("DELETE FROM research_queue WHERE task_type != ?", (TASK_TYPE_STOCK_RESEARCH,))
+    conn.execute("DELETE FROM task_queue WHERE task_type != ?", (TASK_TYPE_STOCK_RESEARCH,))
+    conn.execute("DELETE FROM stock_research_runs WHERE task_type != ?", (TASK_TYPE_STOCK_RESEARCH,))
 
 
 def normalize_trade_date(value: object) -> str:
@@ -674,6 +693,7 @@ def upsert_queue_item(
     task_keyword: str,
     prompt: str,
     depends_on_task_type: str | None,
+    trigger_reason: str | None,
     task_date: str | None,
     now: str,
     source_type: str = QUEUE_SOURCE_TRACKABLE,
@@ -692,10 +712,10 @@ def upsert_queue_item(
     conn.execute(
         """
         INSERT INTO research_queue (
-            report_id, code, name, priority, stage, task_type, task_id, run_id, depends_on_task_type,
+            report_id, code, name, priority, stage, task_type, task_id, run_id, depends_on_task_type, trigger_reason,
             source_type, source_detail, task_keyword, prompt, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(report_id, code, task_type) DO UPDATE SET
             name=excluded.name,
             priority=excluded.priority,
@@ -703,6 +723,7 @@ def upsert_queue_item(
             task_id=excluded.task_id,
             run_id=excluded.run_id,
             depends_on_task_type=excluded.depends_on_task_type,
+            trigger_reason=excluded.trigger_reason,
             source_type=excluded.source_type,
             source_detail=excluded.source_detail,
             task_keyword=excluded.task_keyword,
@@ -719,6 +740,7 @@ def upsert_queue_item(
             task_id,
             run_id,
             depends_on_task_type,
+            trigger_reason,
             source_type,
             source_detail,
             task_keyword,
@@ -970,15 +992,15 @@ def claim_next_queue_item(conn: sqlite3.Connection) -> sqlite3.Row | None:
     ).fetchone()
 
 
-def has_strategic_work(conn: sqlite3.Connection, code: str) -> bool:
+def has_stock_research_work(conn: sqlite3.Connection, code: str) -> bool:
     queued = conn.execute(
         """
         SELECT 1
         FROM research_queue
-        WHERE code = ? AND task_type = 'strategic'
+        WHERE code = ? AND task_type = ?
         LIMIT 1
         """,
-        (code,),
+        (code, TASK_TYPE_STOCK_RESEARCH),
     ).fetchone()
     if queued:
         return True
@@ -986,10 +1008,10 @@ def has_strategic_work(conn: sqlite3.Connection, code: str) -> bool:
         """
         SELECT 1
         FROM stock_research_runs
-        WHERE code = ? AND task_type = 'strategic'
+        WHERE code = ? AND task_type = ?
         LIMIT 1
         """,
-        (code,),
+        (code, TASK_TYPE_STOCK_RESEARCH),
     ).fetchone()
     return completed is not None
 
@@ -1057,6 +1079,7 @@ def insert_research_run(conn: sqlite3.Connection, report: StockResearchReport) -
         "annual_growth": report.annual_growth,
         "multi_bagger_potential": report.multi_bagger_potential,
         "heavy_position_view": report.heavy_position_view,
+        "trigger_reason": report.trigger_reason,
         "evidence_json": _json(payload["evidence"]),
         "assumptions_json": _json(payload["assumptions"]),
         "risks_json": _json(report.risk.invalidation_conditions),

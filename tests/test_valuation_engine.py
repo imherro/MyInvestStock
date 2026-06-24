@@ -127,8 +127,9 @@ class ValuationEngineTests(unittest.TestCase):
                 "stock_code": "600519.SH",
                 "stock_name": "贵州茅台",
                 "source_report_id": "leader_review_2026-06-24",
-                "task_type": "financial",
+                "task_type": "stock_research",
                 "research_date": "2026-06-24",
+                "trigger_reason": "新进入可跟踪龙头",
                 "status": "complete",
                 "title": "贵州茅台 deterministic valuation report",
                 "summary": "估值区间和 signal 由确定性估值引擎生成。",
@@ -196,7 +197,7 @@ class ValuationEngineTests(unittest.TestCase):
         )
         self.assertEqual(
             report.run_id,
-            compute_task_run_id("600519.SH", "financial", "2026-06-24", "stock_research_report.v1"),
+            compute_task_run_id("600519.SH", "stock_research", "2026-06-24", "stock_research_report.v1"),
         )
         self.assertEqual(report.valuation.engine_version, "valuation_engine.v1")
         self.assertEqual(report.valuation.risk_adjusted_score, signal.risk_adjusted_score)

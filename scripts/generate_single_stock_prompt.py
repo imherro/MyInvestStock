@@ -20,7 +20,7 @@ def main() -> int:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--next", action="store_true", help="Use the next pending queue item.")
     group.add_argument("--code", help="Use a specific stock code from the queue.")
-    parser.add_argument("--task-type", choices=["strategic", "financial"], help="Limit --code to one task type.")
+    parser.add_argument("--task-type", choices=["stock_research"], help="Limit --code to one task type.")
     parser.add_argument("--claim", action="store_true", help="Mark the selected --next task as in_progress.")
     args = parser.parse_args()
     if args.claim and not args.next:
@@ -38,11 +38,11 @@ def main() -> int:
             ]
             row = matches[0] if matches else None
     if row is None:
-        print("没有找到可领取的待研究股票。请先运行 python scripts/ingest_index.py，或等待前置战略深研完成。")
+        print("没有找到可领取的待研究股票。请先运行 python scripts/ingest_index.py，或等待触发监测入队。")
         return 1
     print(row["task_keyword"])
     print(f"task_type={row['task_type']}")
-    print(f"depends_on_task_type={row['depends_on_task_type'] or ''}")
+    print(f"trigger_reason={row['trigger_reason'] or ''}")
     print()
     print(row["prompt"])
     return 0

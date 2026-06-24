@@ -9,6 +9,8 @@ from pathlib import Path
 from core.task.state import TaskStatus, compute_task_run_id, validate_transition
 from myinveststock.db import (
     QUEUE_SOURCE_TRACKABLE,
+    TASK_TYPE_STOCK_RESEARCH,
+    TRIGGER_TRACKABLE_LEADER,
     claim_next_queue_item,
     connect,
     init_db,
@@ -37,22 +39,23 @@ def add_report(conn) -> None:
     )
 
 
-def enqueue_financial(conn) -> str:
+def enqueue_stock_research(conn) -> str:
     upsert_queue_item(
         conn,
         report_id="leader_review_2026-06-24",
         code="600519.SH",
         name="贵州茅台",
         priority=1,
-        stage=2,
-        task_type="financial",
-        task_keyword="MyInvestStock 个股财务估值深研 600519.SH 贵州茅台",
+        stage=1,
+        task_type=TASK_TYPE_STOCK_RESEARCH,
+        task_keyword="MyInvestStock 个股深研 600519.SH 贵州茅台",
         prompt="研究提示词",
         depends_on_task_type=None,
+        trigger_reason=TRIGGER_TRACKABLE_LEADER,
         task_date="2026-06-24",
         now="2026-06-24T11:00:00+00:00",
     )
-    return compute_task_run_id("600519.SH", "financial", "2026-06-24", "stock_research_report.v1")
+    return compute_task_run_id("600519.SH", TASK_TYPE_STOCK_RESEARCH, "2026-06-24", "stock_research_report.v1")
 
 
 class TaskStateTests(unittest.TestCase):
@@ -96,6 +99,7 @@ class TaskStateTests(unittest.TestCase):
                 ).fetchone()
             self.assertIn("task_id", columns)
             self.assertIn("run_id", columns)
+            self.assertIn("trigger_reason", columns)
             self.assertIn("source_type", columns)
             self.assertIn("source_detail", columns)
             self.assertNotIn("status", columns)
@@ -113,8 +117,8 @@ class TaskStateTests(unittest.TestCase):
             init_db(db_path)
             with closing(connect(db_path)) as conn:
                 add_report(conn)
-                run_id = enqueue_financial(conn)
-                enqueue_financial(conn)
+                run_id = enqueue_stock_research(conn)
+                enqueue_stock_research(conn)
                 conn.commit()
                 task_count = conn.execute("SELECT COUNT(*) AS count FROM task_queue").fetchone()["count"]
                 self.assertEqual(task_count, 1)
@@ -127,12 +131,13 @@ class TaskStateTests(unittest.TestCase):
                 queue_view = list_queue(conn)
                 self.assertEqual(queue_view[0]["status"], "in_progress")
                 self.assertEqual(queue_view[0]["source_type"], QUEUE_SOURCE_TRACKABLE)
-                self.assertEqual(get_task_status(conn, "600519.SH", "financial")[0]["status"], TaskStatus.RUNNING.value)
+                self.assertEqual(queue_view[0]["trigger_reason"], TRIGGER_TRACKABLE_LEADER)
+                self.assertEqual(get_task_status(conn, "600519.SH", TASK_TYPE_STOCK_RESEARCH)[0]["status"], TaskStatus.RUNNING.value)
 
                 mark_queue_status(
                     conn,
                     code="600519.SH",
-                    task_type="financial",
+                    task_type=TASK_TYPE_STOCK_RESEARCH,
                     status="complete",
                     report_id="leader_review_2026-06-24",
                 )
@@ -145,7 +150,7 @@ class TaskStateTests(unittest.TestCase):
                 self.assertEqual(done["retry_count"], 0)
                 self.assertEqual(list_queue(conn)[0]["status"], "complete")
 
-                enqueue_financial(conn)
+                enqueue_stock_research(conn)
                 still_done = conn.execute("SELECT status FROM task_queue WHERE run_id = ?", (run_id,)).fetchone()
                 self.assertEqual(still_done["status"], TaskStatus.DONE.value)
                 self.assertEqual(list_orphan_tasks(conn), [])
@@ -158,11 +163,11 @@ class TaskStateTests(unittest.TestCase):
             init_db(db_path)
             with closing(connect(db_path)) as conn:
                 add_report(conn)
-                run_id = enqueue_financial(conn)
+                run_id = enqueue_stock_research(conn)
                 conn.commit()
                 self.assertIsNotNone(claim_next_queue_item(conn))
                 transition_task_status(conn, run_id=run_id, target=TaskStatus.FAILED, error_message="validation error")
-                enqueue_financial(conn)
+                enqueue_stock_research(conn)
                 row = conn.execute(
                     "SELECT status, retry_count FROM task_queue WHERE run_id = ?",
                     (run_id,),
@@ -176,7 +181,7 @@ class TaskStateTests(unittest.TestCase):
             init_db(db_path)
             with closing(connect(db_path)) as conn:
                 add_report(conn)
-                run_id = enqueue_financial(conn)
+                run_id = enqueue_stock_research(conn)
                 conn.commit()
                 self.assertIsNotNone(claim_next_queue_item(conn))
                 conn.execute(

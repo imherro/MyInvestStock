@@ -14,8 +14,9 @@ OBSERVABILITY_INPUT = {
     "stock_code": "600519.SH",
     "stock_name": "贵州茅台",
     "source_report_id": "leader_review_2026-06-24",
-    "task_type": "financial",
+    "task_type": "stock_research",
     "research_date": "2026-06-24",
+    "trigger_reason": "新进入可跟踪龙头",
     "financial_rows": [
         {"revenue": 100.0, "net_profit": 10.0, "equity": 50.0, "gross_margin": 0.45, "debt": 20.0, "free_cash_flow": 8.0, "market_cap": 200.0},
         {"revenue": 120.0, "net_profit": 13.0, "equity": 60.0, "gross_margin": 0.47, "debt": 22.0, "free_cash_flow": 10.0, "market_cap": 220.0},

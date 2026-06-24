@@ -43,8 +43,8 @@ key_results.primary_output.items
 - `summary.stock_count`: 当前主结果股票数量
 - `summary.research_run_count`: 已入库研究记录数量
 - `stocks[].leader`: 该股票的主结果信息
-- `stocks[].research.strategic`: 最新战略深研底稿
-- `stocks[].research.financial`: 最新财务估值深研
+- `stocks[].research.latest`: 最新完整个股深研，`task_type=stock_research`
+- `stocks[].research.history`: 历史完整个股深研记录
 - `stocks[].research.valuation_history`: 历次估值区间
 - `stocks[].decision_matrix`: `MyInvestTheme mainline environment + MyInvestLeader stock signal + MyInvestStock financial safety margin` 的矩阵结论
 
@@ -67,6 +67,7 @@ key_results.primary_output.items
 
 - `source_type`: `trackable_leader` 或 `manual_request`
 - `source_label`: `可跟踪龙头` 或 `其他请求`
+- `trigger_reason`: 本次入队原因，例如 `新进入可跟踪龙头`、`手工请求研究`、`估值中枢变化`
 
 ## `/api/stocks/{code}`
 
@@ -85,3 +86,4 @@ key_results.primary_output.items
 ## 约束
 
 两个接口都只读，不包含交易指令、现金金额或股数。
+新系统只输出 `stock_research` 研究记录；旧任务类型和旧估值记录会在数据库初始化时清理。

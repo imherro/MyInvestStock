@@ -13,8 +13,9 @@ ASSEMBLY_INPUT = {
     "stock_code": "600519.SH",
     "stock_name": "贵州茅台",
     "source_report_id": "leader_review_2026-06-24",
-    "task_type": "financial",
+    "task_type": "stock_research",
     "research_date": "2026-06-24",
+    "trigger_reason": "新进入可跟踪龙头",
     "industry_position": "高端白酒龙头，品牌和渠道优势仍明显。",
     "competition_landscape": "主要竞争来自五粮液、泸州老窖及区域高端酒企。",
     "upstream_downstream": "上游粮食和包材影响较小，下游渠道议价和库存是关键。",
@@ -91,7 +92,7 @@ class ReportAssemblyTests(unittest.TestCase):
         self.assertEqual(len(first.report_hash or ""), 64)
         self.assertEqual(
             first.run_id,
-            compute_task_run_id("600519.SH", "financial", "2026-06-24", "stock_research_report.v1"),
+            compute_task_run_id("600519.SH", "stock_research", "2026-06-24", "stock_research_report.v1"),
         )
         self.assertEqual(first.heavy_position_view, first.conclusion.grade)
         self.assertGreater(first.valuation.intrinsic_value_mid or 0.0, 0.0)

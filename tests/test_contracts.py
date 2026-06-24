@@ -9,6 +9,9 @@ import unittest
 from myinveststock.db import (
     QUEUE_SOURCE_REQUEST,
     QUEUE_SOURCE_TRACKABLE,
+    TASK_TYPE_STOCK_RESEARCH,
+    TRIGGER_MANUAL_REQUEST,
+    TRIGGER_TRACKABLE_LEADER,
     connect,
     init_db,
     list_daily_prices,
@@ -21,11 +24,9 @@ from myinveststock.db import (
     upsert_trackable_leader,
 )
 from myinveststock.leader_index import (
-    build_requested_financial_prompt,
-    build_requested_strategic_prompt,
-    build_financial_prompt,
+    build_requested_stock_research_prompt,
     build_report_explainer_prompt,
-    build_strategic_prompt,
+    build_stock_research_prompt,
     enqueue_requested_stock,
     primary_items,
     report_meta,
@@ -65,25 +66,20 @@ class ContractTests(unittest.TestCase):
         items = primary_items(payload)
         self.assertEqual([item["code"] for item in items], ["603259.SH"])
 
-    def test_strategic_prompt_is_one_stock_only(self) -> None:
+    def test_stock_research_prompt_is_one_stock_only(self) -> None:
         report = {"report_id": "r1", "basis_date": "2026-06-22"}
         item = {"code": "600519.SH", "name": "贵州茅台", "theme": "消费/传媒"}
-        prompt = build_strategic_prompt(item, report)
+        prompt = build_stock_research_prompt(item, report, trigger_reason=TRIGGER_TRACKABLE_LEADER)
         self.assertIn("唯一研究对象：600519.SH 贵州茅台", prompt)
         self.assertIn("禁止同时研究其他 A可跟踪龙头", prompt)
         self.assertIn("key_results.primary_output.items", prompt)
-        self.assertIn("不给最终估值区间", prompt)
-
-    def test_financial_prompt_depends_on_strategic(self) -> None:
-        report = {"report_id": "r1", "basis_date": "2026-06-22"}
-        item = {"code": "600519.SH", "name": "贵州茅台", "theme": "消费/传媒"}
-        prompt = build_financial_prompt(item, report)
-        self.assertIn("task_type='strategic'", prompt)
-        self.assertIn("task_type 固定为 financial", prompt)
+        self.assertIn("完整个股深研", prompt)
+        self.assertIn("task_type 固定为 stock_research", prompt)
         self.assertIn("assembly_input", prompt)
         self.assertIn("不要手写最终 StockResearchReport", prompt)
         self.assertIn("scripts/build_research_report.py --audit-db", prompt)
         self.assertIn("不能重新计算估值", prompt)
+        self.assertIn("数倍潜力", prompt)
 
     def test_report_explainer_prompt_is_interpreter_only(self) -> None:
         prompt = build_report_explainer_prompt({"stock_code": "600519.SH", "report_hash": "abc"})
@@ -96,12 +92,12 @@ class ContractTests(unittest.TestCase):
     def test_requested_stock_prompts_do_not_require_api_index_membership(self) -> None:
         report = {"report_id": "manual_research_request_2026-06-24", "basis_date": "2026-06-24"}
         item = {"code": "002594.SZ", "name": "比亚迪"}
-        strategic = build_requested_strategic_prompt(item, report)
-        financial = build_requested_financial_prompt(item, report)
-        self.assertIn("用户主动请求", strategic)
-        self.assertIn("不要求出现在 /api/index", strategic)
-        self.assertIn("不要求出现在 /api/index", financial)
-        self.assertNotIn("key_results.primary_output.items", strategic)
+        prompt = build_requested_stock_research_prompt(item, report, trigger_reason=TRIGGER_MANUAL_REQUEST)
+        self.assertIn("用户主动请求", prompt)
+        self.assertIn("不要求出现在 /api/index", prompt)
+        self.assertIn("task_type", prompt)
+        self.assertIn("stock_research", prompt)
+        self.assertNotIn("key_results.primary_output.items", prompt)
 
     def test_report_id_required(self) -> None:
         with self.assertRaises(ValueError):
@@ -322,7 +318,7 @@ class ContractTests(unittest.TestCase):
             {"posture": "主线弹性跟踪", "conclusion": "上游主线强，但财务安全边际不足"},
         )
         self.assertIn("来自 MyInvestLeader", html)
-        self.assertIn("财务模型原始标签：高估暂缓", html)
+        self.assertIn("估值模型原始标签：高估暂缓", html)
         self.assertIn("主线弹性跟踪", html)
 
     def test_queue_rows_link_to_stock_page(self) -> None:
@@ -330,13 +326,14 @@ class ContractTests(unittest.TestCase):
             [
                 {
                     "priority": 1,
-                    "stage": 2,
+                    "stage": 1,
                     "code": "600519.SH",
                     "name": "贵州茅台",
                     "source_type": QUEUE_SOURCE_TRACKABLE,
-                    "task_type": "financial",
+                    "trigger_reason": TRIGGER_TRACKABLE_LEADER,
+                    "task_type": TASK_TYPE_STOCK_RESEARCH,
                     "status": "pending",
-                    "task_keyword": "MyInvestStock 个股财务估值深研 600519.SH 贵州茅台",
+                    "task_keyword": "MyInvestStock 个股深研 600519.SH 贵州茅台",
                 }
             ]
         )
@@ -353,9 +350,10 @@ class ContractTests(unittest.TestCase):
             with closing(connect(db_path)) as conn:
                 rows = list_queue(conn)
                 report = latest_report(conn)
-            self.assertEqual(result["queued"], ["strategic", "financial"])
+            self.assertEqual(result["queued"], [TASK_TYPE_STOCK_RESEARCH])
             self.assertEqual({row["source_type"] for row in rows}, {QUEUE_SOURCE_REQUEST})
-            self.assertEqual([row["task_type"] for row in rows], ["strategic", "financial"])
+            self.assertEqual([row["task_type"] for row in rows], [TASK_TYPE_STOCK_RESEARCH])
+            self.assertEqual(rows[0]["trigger_reason"], TRIGGER_MANUAL_REQUEST)
             self.assertIsNone(report)
 
     def test_stock_code_links_to_xueqiu_new_window(self) -> None:
@@ -442,7 +440,7 @@ class ContractTests(unittest.TestCase):
         self.assertIn("kline-layer", html)
         self.assertIn("valuation-step-band", html)
         self.assertIn("legend-kline", html)
-        self.assertIn("财务深研刷新点", html)
+        self.assertIn("个股深研刷新点", html)
 
     def test_single_valuation_chart_uses_whisker_without_band(self) -> None:
         html = render_valuation_chart(
@@ -542,10 +540,11 @@ class ContractTests(unittest.TestCase):
                     name="比亚迪",
                     priority=1,
                     stage=1,
-                    task_type="strategic",
-                    task_keyword="MyInvestStock 个股战略深研 002594.SZ 比亚迪",
+                    task_type=TASK_TYPE_STOCK_RESEARCH,
+                    task_keyword="MyInvestStock 个股深研 002594.SZ 比亚迪",
                     prompt="研究提示词",
                     depends_on_task_type=None,
+                    trigger_reason=TRIGGER_MANUAL_REQUEST,
                     task_date="2026-06-24",
                     now="2026-06-24T11:00:00+00:00",
                     source_type=QUEUE_SOURCE_REQUEST,
@@ -557,7 +556,7 @@ class ContractTests(unittest.TestCase):
                     )
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    ("300750.SZ", "宁德时代", "financial", "2026-06-24", "2026-06-24T11:00:00+00:00", "complete"),
+                    ("300750.SZ", "宁德时代", TASK_TYPE_STOCK_RESEARCH, "2026-06-24", "2026-06-24T11:00:00+00:00", "complete"),
                 )
                 rows = list_price_refresh_subjects(conn)
 
@@ -599,10 +598,11 @@ class ContractTests(unittest.TestCase):
     def test_latest_research_summary_contract(self) -> None:
         row = {
             "id": 1,
-            "task_type": "financial",
+            "task_type": TASK_TYPE_STOCK_RESEARCH,
+            "trigger_reason": TRIGGER_TRACKABLE_LEADER,
             "research_date": "2026-06-24",
             "status": "complete",
-            "title": "财务估值深研",
+            "title": "个股深研",
             "summary": "示例",
             "valuation_low": 90,
             "valuation_mid": 120,
@@ -622,7 +622,8 @@ class ContractTests(unittest.TestCase):
             "raw_json": '{"valuation":{"undervalued_score":75,"growth_score":60,"quality_score":70,"risk_adjusted_score":66}}',
         }
         summary = research_run_to_summary(row)
-        self.assertEqual(summary["task_type"], "financial")
+        self.assertEqual(summary["task_type"], TASK_TYPE_STOCK_RESEARCH)
+        self.assertEqual(summary["trigger_reason"], TRIGGER_TRACKABLE_LEADER)
         self.assertEqual(summary["valuation"]["mid"], 120)
         self.assertEqual(summary["risks"], ["估值收缩"])
         self.assertEqual(summary["financial_signal"]["bucket"], "high")

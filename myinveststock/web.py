@@ -98,6 +98,7 @@ def research_run_to_summary(row: object) -> dict[str, object]:
     return {
         "id": row["id"],
         "task_type": row["task_type"],
+        "trigger_reason": _row_value(row, "trigger_reason"),
         "research_date": row["research_date"],
         "status": row["status"],
         "title": row["title"],
@@ -123,9 +124,9 @@ def research_run_to_summary(row: object) -> dict[str, object]:
     }
 
 
-def latest_by_task_type(runs: list[object], task_type: str) -> dict[str, object] | None:
+def latest_stock_research(runs: list[object]) -> dict[str, object] | None:
     for row in runs:
-        if row["task_type"] == task_type:
+        if row["task_type"] == "stock_research":
             return research_run_to_summary(row)
     return None
 
@@ -324,7 +325,7 @@ def financial_signal_summary(row: object | None) -> dict[str, object]:
             "source": "MyInvestStock deterministic valuation",
             "bucket": "unknown",
             "label": _bucket_label("unknown", kind="financial"),
-            "explanation": "等待财务估值深研入库。",
+            "explanation": "等待个股深研入库。",
         }
     raw = load_json(_row_value(row, "raw_json"), {})
     valuation = raw.get("valuation") if isinstance(raw, dict) else {}
@@ -611,12 +612,13 @@ def xueqiu_stock_link(code: object, preferred_url: object | None = None) -> str:
 
 def render_queue_rows(queue: list[object]) -> str:
     if not queue:
-        return '<tr><td colspan="8" class="empty-cell">当前队列为空。</td></tr>'
+        return '<tr><td colspan="9" class="empty-cell">当前队列为空。</td></tr>'
     return "".join(
         f"""<tr>
       <td>{esc(row['priority'])}</td>
       <td>{esc(row['stage'])}</td>
       <td>{esc(queue_source_label(row['source_type']))}</td>
+      <td>{esc(row['trigger_reason'] or '待记录')}</td>
       <td>{xueqiu_stock_link(row['code'])}</td>
       <td>{stock_page_link(row['code'], row['name'])}</td>
       <td>{esc(row['task_type'])}</td>
@@ -691,7 +693,7 @@ def render_home() -> bytes:
       <h2>个股深研队列</h2>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>优先级</th><th>阶段</th><th>来源</th><th>代码</th><th>名称</th><th>类型</th><th>状态</th><th>任务关键词</th></tr></thead>
+          <thead><tr><th>优先级</th><th>阶段</th><th>来源</th><th>触发原因</th><th>代码</th><th>名称</th><th>类型</th><th>状态</th><th>任务关键词</th></tr></thead>
           <tbody>{queue_rows}</tbody>
         </table>
       </div>
@@ -1064,7 +1066,7 @@ def _render_kline_valuation_chart(
           <span><i class="legend-kline"></i>近期K线</span>
           <span><i class="legend-band"></i>保守-乐观区间</span>
           <span><i class="legend-line"></i>合理估值中枢</span>
-          <span><i class="legend-dot"></i>财务深研刷新点</span>
+          <span><i class="legend-dot"></i>个股深研刷新点</span>
         </div>
       </div>
     </section>"""
@@ -1087,6 +1089,7 @@ def render_stock_queue_status(queue: list[object]) -> str:
         f"""<tr>
       <td>{esc(row['task_type'])}</td>
       <td>{esc(queue_source_label(row['source_type']))}</td>
+      <td>{esc(row['trigger_reason'] or '待记录')}</td>
       <td>{esc(row['status'])}</td>
       <td>{esc(row['task_keyword'])}</td>
       <td>{esc(row['updated_at'])}</td>
@@ -1097,7 +1100,7 @@ def render_stock_queue_status(queue: list[object]) -> str:
         <h2>研究队列状态</h2>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>类型</th><th>来源</th><th>状态</th><th>任务关键词</th><th>更新时间</th></tr></thead>
+            <thead><tr><th>类型</th><th>来源</th><th>触发原因</th><th>状态</th><th>任务关键词</th><th>更新时间</th></tr></thead>
             <tbody>{rows}</tbody>
           </table>
         </div>
@@ -1164,7 +1167,7 @@ def render_signal_matrix(
               {signal_item("质量", fmt_num(financial_signal.get("quality_score")))}
               {signal_item("风险调整", fmt_num(financial_signal.get("risk_adjusted_score")))}
             </div>
-            <p class="signal-note">财务模型原始标签：{esc(financial_signal.get("raw_grade") or "待入库")}</p>
+            <p class="signal-note">估值模型原始标签：{esc(financial_signal.get("raw_grade") or "待入库")}</p>
           </div>
           <div class="matrix-conclusion">
             <span>矩阵结论</span>
@@ -1211,14 +1214,14 @@ def _first_queue_name(queue: list[object], code: str) -> str:
 
 def _stock_exists(conn: object, code: str) -> tuple[bool, str | None]:
     leader = get_latest_leader(conn, code) or get_known_leader(conn, code)
-    if leader is not None:
-        return True, str(leader["name"])
     runs = list_research_runs(conn, code)
     if runs:
         return True, str(runs[0]["name"])
     queue = list_queue_for_stock(conn, code)
     if queue:
         return True, str(queue[0]["name"])
+    if leader is not None:
+        return False, str(leader["name"])
     return False, None
 
 
@@ -1254,9 +1257,7 @@ def render_stock_page(code: str) -> bytes:
     market = load_json(leader["market_json"], {}) if leader is not None else {}
     scores = load_json(leader["scores_json"], {}) if leader is not None else {}
     risk_flags = load_json(leader["risk_flags_json"], []) if leader is not None else []
-    strategic_run = next((dict(row) for row in runs if row["task_type"] == "strategic"), {})
-    financial_run = next((dict(row) for row in runs if row["task_type"] == "financial"), {})
-    latest = financial_run or strategic_run
+    latest = next((dict(row) for row in runs if row["task_type"] == "stock_research"), {})
     risks = load_json(latest.get("risks_json"), []) if latest else []
     risk_items = "".join(f"<li>{esc(item)}</li>" for item in (risks or risk_flags or []))
     stock_name = (
@@ -1268,7 +1269,7 @@ def render_stock_page(code: str) -> bytes:
     stock_claim = leader["candidate_leader_claim"] if leader is not None else "主动研究请求"
     xueqiu_url = leader["xueqiu_url"] if leader is not None else None
     upstream_signal = upstream_signal_summary(leader)
-    financial_signal = financial_signal_summary(financial_run if financial_run else None)
+    financial_signal = financial_signal_summary(latest if latest else None)
     decision_matrix = decision_matrix_summary(upstream_signal, financial_signal)
     rating_label = (
         f"{leader['deep_rating'] or ''} {leader['deep_label'] or ''}".strip()
@@ -1284,6 +1285,7 @@ def render_stock_page(code: str) -> bytes:
         f"""<tr>
       <td>{esc(row['research_date'])}</td>
       <td>{esc(row['task_type'])}</td>
+      <td>{esc(row['trigger_reason'] or '待记录')}</td>
       <td>{esc(row['status'])}</td>
       <td>{esc(row['valuation_method'] or '待入库')}</td>
       <td>{fmt_num(row['valuation_low'])} / {fmt_num(row['valuation_mid'])} / {fmt_num(row['valuation_high'])}</td>
@@ -1292,7 +1294,7 @@ def render_stock_page(code: str) -> bytes:
         for row in runs
     )
     if not history_rows:
-        history_rows = "<tr><td colspan=\"6\" class=\"empty-cell\">等待个股深研入库。</td></tr>"
+        history_rows = "<tr><td colspan=\"7\" class=\"empty-cell\">等待个股深研入库。</td></tr>"
 
     body = f"""
     <section class="page-band">
@@ -1326,32 +1328,36 @@ def render_stock_page(code: str) -> bytes:
       <section class="two-col">
         <div class="section-block">
           <h2>行业地位</h2>
-          <p>{esc(strategic_run.get('industry_position') or '等待战略深研入库。')}</p>
+          <p>{esc(latest.get('industry_position') or '等待个股深研入库。')}</p>
         </div>
         <div class="section-block">
           <h2>竞争格局</h2>
-          <p>{esc(strategic_run.get('competition_landscape') or '等待战略深研入库。')}</p>
+          <p>{esc(latest.get('competition_landscape') or '等待个股深研入库。')}</p>
         </div>
       </section>
       <section class="two-col">
         <div class="section-block">
           <h2>上下游公司</h2>
-          <p>{esc(strategic_run.get('upstream_downstream') or '等待战略深研入库。')}</p>
+          <p>{esc(latest.get('upstream_downstream') or '等待个股深研入库。')}</p>
         </div>
         <div class="section-block">
           <h2>年增长率</h2>
-          <p>{esc(financial_run.get('annual_growth') or '等待财务估值深研入库。')}</p>
+          <p>{esc(latest.get('annual_growth') or '等待个股深研入库。')}</p>
         </div>
       </section>
       <section class="two-col">
         <div class="section-block">
-          <h2>五倍十倍潜力</h2>
-          <p>{esc((financial_run or strategic_run).get('multi_bagger_potential') or '等待深研入库。')}</p>
+          <h2>数倍潜力</h2>
+          <p>{esc(latest.get('multi_bagger_potential') or '等待个股深研入库。')}</p>
         </div>
         <div class="section-block">
           <h2>重仓研究资格</h2>
-          <p>{esc(decision_matrix.get('conclusion') or financial_run.get('heavy_position_view') or '等待财务估值深研入库。')}</p>
+          <p>{esc(decision_matrix.get('conclusion') or latest.get('heavy_position_view') or '等待个股深研入库。')}</p>
         </div>
+      </section>
+      <section class="section-block">
+        <h2>本次触发原因</h2>
+        <p>{esc(latest.get('trigger_reason') or (stock_queue[0]['trigger_reason'] if stock_queue else '等待个股深研入库。'))}</p>
       </section>
       <section class="section-block">
         <h2>风险与证伪</h2>
@@ -1361,7 +1367,7 @@ def render_stock_page(code: str) -> bytes:
         <h2>研究历史</h2>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>日期</th><th>类型</th><th>状态</th><th>估值方法</th><th>保守 / 合理 / 乐观</th><th>重仓资格</th></tr></thead>
+            <thead><tr><th>日期</th><th>类型</th><th>触发原因</th><th>状态</th><th>估值方法</th><th>保守 / 合理 / 乐观</th><th>重仓资格</th></tr></thead>
             <tbody>{history_rows}</tbody>
           </table>
         </div>
@@ -1435,20 +1441,18 @@ def api_latest() -> bytes:
             valuation_runs_for_stock = valuation_runs(conn, leader["code"])
             research_run_count += len(runs)
             valuation_run_count += len(valuation_runs_for_stock)
-            strategic = latest_by_task_type(runs, "strategic")
-            financial = latest_by_task_type(runs, "financial")
+            latest_research = latest_stock_research(runs)
             leader_summary = leader_to_summary(leader)
             decision_matrix = decision_matrix_summary(
                 leader_summary["upstream_signal"],
-                financial["financial_signal"] if financial else financial_signal_summary(None),
+                latest_research["financial_signal"] if latest_research else financial_signal_summary(None),
             )
             stocks.append(
                 {
                     "leader": leader_summary,
                     "research": {
-                        "strategic": strategic,
-                        "financial": financial,
-                        "latest": financial or strategic,
+                        "latest": latest_research,
+                        "history": [research_run_to_summary(row) for row in runs],
                         "valuation_history": valuation_history_payload(valuation_runs_for_stock),
                         "run_count": len(runs),
                     },
@@ -1489,10 +1493,10 @@ def api_stock(code: str) -> bytes:
     for row in queue:
         row["source_label"] = queue_source_label(row.get("source_type"))
     leader_summary = leader_to_summary(leader) if leader else None
-    financial_row = next((row for row in runs if row.get("task_type") == "financial"), None)
+    latest_run = next((row for row in runs if row.get("task_type") == "stock_research"), None)
     decision_matrix = decision_matrix_summary(
         leader_summary["upstream_signal"] if leader_summary else upstream_signal_summary(None),
-        financial_signal_summary(financial_row) if financial_row else financial_signal_summary(None),
+        financial_signal_summary(latest_run) if latest_run else financial_signal_summary(None),
     )
     return json.dumps(
         {

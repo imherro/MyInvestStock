@@ -44,10 +44,14 @@ def main() -> int:
 
     config_source = (ROOT / "myinveststock" / "config.py").read_text(encoding="utf-8")
     leader_source = (ROOT / "myinveststock" / "leader_index.py").read_text(encoding="utf-8")
+    schema_source = (ROOT / "core" / "schema" / "stock_report.py").read_text(encoding="utf-8")
+    trigger_script = ROOT / "scripts" / "monitor_research_triggers.py"
     ok &= check("https://invest.okbbc.com/footer.js" in config_source, "unified footer script is wired")
     ok &= check('LEADER_INDEX_URL = "https://leader.okbbc.com/api/index"' in config_source, "upstream source is /api/index")
     ok &= check('THEME_INDEX_URL = "https://theme.okbbc.com/api/index"' in config_source, "theme context source is /api/index")
     ok &= check("themes[].stock_leaders" not in leader_source, "ingest does not expand from stock_leaders")
+    ok &= check('Literal["stock_research"]' in schema_source, "new research task type is stock_research only")
+    ok &= check(trigger_script.exists(), "research trigger monitor exists")
     docs = (ROOT / "docs" / "DATA_SOURCES.md").read_text(encoding="utf-8")
     ok &= check("key_results.primary_output.items" in docs, "primary result path is documented")
     ok &= check("mainline_ranking" in docs, "theme mainline context is documented")

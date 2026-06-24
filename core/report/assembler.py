@@ -206,7 +206,7 @@ def build_stock_report(input_data: Mapping[str, Any], trace_recorder: TraceRecor
     stock_code = _safe_str(input_data.get("stock_code") or input_data.get("code"), "000000.SH")
     stock_name = _safe_str(input_data.get("stock_name") or input_data.get("name"), stock_code)
     research_date = _safe_str(input_data.get("research_date"), "1970-01-01")
-    task_type = _safe_str(input_data.get("task_type"), "financial")
+    task_type = _safe_str(input_data.get("task_type"), "stock_research")
     run_id = compute_task_run_id(stock_code, task_type, research_date, "stock_research_report.v1")
 
     features, financial_rows = _features_from_input(input_data)
@@ -314,8 +314,9 @@ def build_stock_report(input_data: Mapping[str, Any], trace_recorder: TraceRecor
         "source_report_id": input_data.get("source_report_id"),
         "task_type": task_type,
         "research_date": research_date,
+        "trigger_reason": input_data.get("trigger_reason"),
         "status": _safe_str(input_data.get("status"), "complete"),
-        "title": _safe_str(input_data.get("title"), f"{stock_name}财务估值深研"),
+        "title": _safe_str(input_data.get("title"), f"{stock_name}个股深研"),
         "summary": _safe_str(input_data.get("summary"), conclusion.summary),
         "industry_position": _safe_str(
             input_data.get("industry_position"),
@@ -335,7 +336,7 @@ def build_stock_report(input_data: Mapping[str, Any], trace_recorder: TraceRecor
         ),
         "multi_bagger_potential": _safe_str(
             input_data.get("multi_bagger_potential"),
-            "五倍十倍潜力由增长分数、质量分数和估值安全边际共同约束。",
+            "数倍潜力由增长分数、质量分数、主线环境和估值安全边际共同约束。",
         ),
         "heavy_position_view": conclusion.grade,
         "fundamentals": {
