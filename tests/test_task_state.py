@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import sqlite3
 from contextlib import closing
 from pathlib import Path
 
@@ -10,6 +11,8 @@ from myinveststock.db import (
     claim_next_queue_item,
     connect,
     init_db,
+    get_task_status,
+    list_queue,
     list_orphan_tasks,
     mark_queue_status,
     recover_stale_running_tasks,
@@ -92,6 +95,7 @@ class TaskStateTests(unittest.TestCase):
                 ).fetchone()
             self.assertIn("task_id", columns)
             self.assertIn("run_id", columns)
+            self.assertNotIn("status", columns)
             self.assertIsNotNone(index)
 
     def test_state_transition_rules_reject_skips(self) -> None:
@@ -117,6 +121,9 @@ class TaskStateTests(unittest.TestCase):
                 self.assertEqual(claimed["run_id"], run_id)
                 task = conn.execute("SELECT status FROM task_queue WHERE run_id = ?", (run_id,)).fetchone()
                 self.assertEqual(task["status"], TaskStatus.RUNNING.value)
+                queue_view = list_queue(conn)
+                self.assertEqual(queue_view[0]["status"], "in_progress")
+                self.assertEqual(get_task_status(conn, "600519.SH", "financial")[0]["status"], TaskStatus.RUNNING.value)
 
                 mark_queue_status(
                     conn,
@@ -132,11 +139,14 @@ class TaskStateTests(unittest.TestCase):
                 ).fetchone()
                 self.assertEqual(done["status"], TaskStatus.DONE.value)
                 self.assertEqual(done["retry_count"], 0)
+                self.assertEqual(list_queue(conn)[0]["status"], "complete")
 
                 enqueue_financial(conn)
                 still_done = conn.execute("SELECT status FROM task_queue WHERE run_id = ?", (run_id,)).fetchone()
                 self.assertEqual(still_done["status"], TaskStatus.DONE.value)
                 self.assertEqual(list_orphan_tasks(conn), [])
+                with self.assertRaises(sqlite3.OperationalError):
+                    conn.execute("UPDATE research_queue SET status = 'pending'")
 
     def test_failed_task_reenqueue_becomes_pending_with_retry_count(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -174,14 +184,12 @@ class TaskStateTests(unittest.TestCase):
                     "SELECT status, error_message FROM task_queue WHERE run_id = ?",
                     (run_id,),
                 ).fetchone()
-                queue_row = conn.execute(
-                    "SELECT status FROM research_queue WHERE run_id = ?",
-                    (run_id,),
-                ).fetchone()
                 self.assertEqual(recovered, 1)
                 self.assertEqual(row["status"], TaskStatus.FAILED.value)
                 self.assertIn("RUNNING exceeded", row["error_message"])
+                queue_row = list_queue(conn)[0]
                 self.assertEqual(queue_row["status"], "blocked")
+                self.assertEqual(queue_row["task_status"], TaskStatus.FAILED.value)
 
 
 if __name__ == "__main__":

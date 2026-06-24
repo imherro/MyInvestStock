@@ -37,6 +37,71 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) 
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
+def _create_research_queue_projection(conn: sqlite3.Connection, table_name: str = "research_queue") -> None:
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_id TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT NOT NULL,
+            priority INTEGER NOT NULL,
+            stage INTEGER NOT NULL,
+            task_type TEXT NOT NULL,
+            task_id TEXT,
+            run_id TEXT,
+            depends_on_task_type TEXT,
+            task_keyword TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE (report_id, code, task_type),
+            FOREIGN KEY (report_id) REFERENCES leader_reports(report_id)
+        )
+        """
+    )
+
+
+def _migrate_research_queue_projection(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "research_queue")
+    if "status" not in columns:
+        _ensure_column(conn, "research_queue", "task_id", "TEXT")
+        _ensure_column(conn, "research_queue", "run_id", "TEXT")
+        return
+
+    legacy_table = "research_queue_legacy_state"
+    conn.execute(f"DROP TABLE IF EXISTS {legacy_table}")
+    conn.execute(f"ALTER TABLE research_queue RENAME TO {legacy_table}")
+    _create_research_queue_projection(conn)
+
+    target_columns = [
+        "id",
+        "report_id",
+        "code",
+        "name",
+        "priority",
+        "stage",
+        "task_type",
+        "task_id",
+        "run_id",
+        "depends_on_task_type",
+        "task_keyword",
+        "prompt",
+        "created_at",
+        "updated_at",
+    ]
+    legacy_columns = _table_columns(conn, legacy_table)
+    select_exprs = [column if column in legacy_columns else "NULL" for column in target_columns]
+    conn.execute(
+        f"""
+        INSERT INTO research_queue ({", ".join(target_columns)})
+        SELECT {", ".join(select_exprs)}
+        FROM {legacy_table}
+        """
+    )
+    conn.execute(f"DROP TABLE {legacy_table}")
+
+
 def init_db(db_path: Path | str = DB_PATH) -> None:
     with closing(connect(db_path)) as conn:
         conn.executescript(
@@ -75,26 +140,6 @@ def init_db(db_path: Path | str = DB_PATH) -> None:
                 raw_json TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 PRIMARY KEY (report_id, code),
-                FOREIGN KEY (report_id) REFERENCES leader_reports(report_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS research_queue (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                report_id TEXT NOT NULL,
-                code TEXT NOT NULL,
-                name TEXT NOT NULL,
-                priority INTEGER NOT NULL,
-                stage INTEGER NOT NULL,
-                task_type TEXT NOT NULL,
-                task_id TEXT,
-                run_id TEXT,
-                depends_on_task_type TEXT,
-                status TEXT NOT NULL DEFAULT 'pending',
-                task_keyword TEXT NOT NULL,
-                prompt TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                UNIQUE (report_id, code, task_type),
                 FOREIGN KEY (report_id) REFERENCES leader_reports(report_id)
             );
 
@@ -141,20 +186,24 @@ def init_db(db_path: Path | str = DB_PATH) -> None:
 
             CREATE INDEX IF NOT EXISTS idx_trackable_code
                 ON trackable_leaders(code);
-            CREATE INDEX IF NOT EXISTS idx_queue_status
-                ON research_queue(status, priority);
             CREATE INDEX IF NOT EXISTS idx_task_queue_status
                 ON task_queue(status, updated_at);
             CREATE INDEX IF NOT EXISTS idx_runs_code_date
                 ON stock_research_runs(code, research_date);
             """
         )
-        _ensure_column(conn, "research_queue", "task_id", "TEXT")
-        _ensure_column(conn, "research_queue", "run_id", "TEXT")
+        _create_research_queue_projection(conn)
+        _migrate_research_queue_projection(conn)
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_queue_run_id
                 ON research_queue(run_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_queue_priority
+                ON research_queue(priority, stage)
             """
         )
         conn.commit()
@@ -284,14 +333,6 @@ def recover_stale_running_tasks(conn: sqlite3.Connection, *, stale_after_minutes
                 target=TaskStatus.FAILED,
                 error_message=f"RUNNING exceeded {stale_after_minutes} minutes",
             )
-            conn.execute(
-                """
-                UPDATE research_queue
-                SET status = 'blocked', updated_at = ?
-                WHERE run_id = ?
-                """,
-                (utc_now(), row["run_id"]),
-            )
             recovered += 1
     return recovered
 
@@ -306,6 +347,32 @@ def list_orphan_tasks(conn: sqlite3.Connection) -> list[sqlite3.Row]:
             WHERE q.run_id IS NULL
             ORDER BY t.created_at, t.run_id
             """
+        )
+    )
+
+
+def get_task_status(conn: sqlite3.Connection, stock_code: str, task_type: str | None = None) -> list[sqlite3.Row]:
+    if task_type:
+        return list(
+            conn.execute(
+                """
+                SELECT *
+                FROM task_queue
+                WHERE stock_code = ? AND task_type = ?
+                ORDER BY updated_at DESC, run_id
+                """,
+                (stock_code, task_type),
+            )
+        )
+    return list(
+        conn.execute(
+            """
+            SELECT *
+            FROM task_queue
+            WHERE stock_code = ?
+            ORDER BY updated_at DESC, task_type, run_id
+            """,
+            (stock_code,),
         )
     )
 
@@ -432,7 +499,7 @@ def upsert_queue_item(
 ) -> None:
     run_id = compute_task_run_id(code, task_type, task_date or report_id, REPORT_SCHEMA_VERSION)
     task_id = compute_task_id(run_id)
-    task_status = idempotent_enqueue_task(
+    idempotent_enqueue_task(
         conn,
         task_id=task_id,
         run_id=run_id,
@@ -440,14 +507,13 @@ def upsert_queue_item(
         task_type=task_type,
         now=now,
     )
-    queue_status = task_status_to_queue_status(task_status)
     conn.execute(
         """
         INSERT INTO research_queue (
             report_id, code, name, priority, stage, task_type, task_id, run_id, depends_on_task_type,
-            status, task_keyword, prompt, created_at, updated_at
+            task_keyword, prompt, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(report_id, code, task_type) DO UPDATE SET
             name=excluded.name,
             priority=excluded.priority,
@@ -455,7 +521,6 @@ def upsert_queue_item(
             task_id=excluded.task_id,
             run_id=excluded.run_id,
             depends_on_task_type=excluded.depends_on_task_type,
-            status=excluded.status,
             task_keyword=excluded.task_keyword,
             prompt=excluded.prompt,
             updated_at=excluded.updated_at
@@ -470,7 +535,6 @@ def upsert_queue_item(
             task_id,
             run_id,
             depends_on_task_type,
-            queue_status,
             task_keyword,
             prompt,
             now,
@@ -521,21 +585,43 @@ def get_latest_leader(conn: sqlite3.Connection, code: str) -> sqlite3.Row | None
     ).fetchone()
 
 
+def _queue_status_case() -> str:
+    return """
+        CASE t.status
+            WHEN 'RUNNING' THEN 'in_progress'
+            WHEN 'DONE' THEN 'complete'
+            WHEN 'FAILED' THEN 'blocked'
+            WHEN 'BLOCKED' THEN 'blocked'
+            ELSE 'pending'
+        END
+    """
+
+
 def list_queue(conn: sqlite3.Connection, status: str | None = None) -> list[sqlite3.Row]:
     params: tuple[Any, ...]
     where = ""
     if status:
-        where = "WHERE status = ?"
-        params = (status,)
+        if status == "blocked":
+            where = "WHERE t.status IN (?, ?)"
+            params = (TaskStatus.FAILED.value, TaskStatus.BLOCKED.value)
+        else:
+            where = "WHERE t.status = ?"
+            params = (queue_status_to_task_status(status).value,)
     else:
         params = ()
     return list(
         conn.execute(
             f"""
-            SELECT *
-            FROM research_queue
+            SELECT
+                q.*,
+                {_queue_status_case()} AS status,
+                t.status AS task_status,
+                t.retry_count AS retry_count,
+                t.error_message AS error_message
+            FROM research_queue q
+            JOIN task_queue t ON t.run_id = q.run_id
             {where}
-            ORDER BY priority ASC, stage ASC, id ASC
+            ORDER BY q.priority ASC, q.stage ASC, q.id ASC
             """,
             params,
         )
@@ -548,8 +634,7 @@ def next_queue_item(conn: sqlite3.Connection) -> sqlite3.Row | None:
         SELECT q.*
         FROM research_queue q
         JOIN task_queue t ON t.run_id = q.run_id
-        WHERE q.status = 'pending'
-          AND t.status = 'PENDING'
+        WHERE t.status = 'PENDING'
           AND (
               q.depends_on_task_type IS NULL
               OR EXISTS (
@@ -575,14 +660,7 @@ def claim_next_queue_item(conn: sqlite3.Connection) -> sqlite3.Row | None:
         conn.commit()
         return None
     transition_task_status(conn, run_id=row["run_id"], target=TaskStatus.RUNNING)
-    conn.execute(
-        """
-        UPDATE research_queue
-        SET status = 'in_progress', updated_at = ?
-        WHERE id = ? AND status = 'pending'
-        """,
-        (now, row["id"]),
-    )
+    conn.execute("UPDATE research_queue SET updated_at = ? WHERE id = ?", (now, row["id"]))
     conn.commit()
     return conn.execute(
         """
@@ -703,7 +781,6 @@ def mark_queue_status(
     status: str,
     report_id: str | None = None,
 ) -> None:
-    now = utc_now()
     if report_id:
         rows = list(
             conn.execute(
@@ -729,24 +806,6 @@ def mark_queue_status(
     target = queue_status_to_task_status(status)
     for row in rows:
         transition_task_status(conn, run_id=row["run_id"], target=target)
-    if report_id:
-        conn.execute(
-            """
-            UPDATE research_queue
-            SET status = ?, updated_at = ?
-            WHERE code = ? AND task_type = ? AND report_id = ?
-            """,
-            (status, now, code, task_type, report_id),
-        )
-    else:
-        conn.execute(
-            """
-            UPDATE research_queue
-            SET status = ?, updated_at = ?
-            WHERE code = ? AND task_type = ?
-            """,
-            (status, now, code, task_type),
-        )
 
 
 def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:

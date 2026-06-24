@@ -37,7 +37,7 @@
 
 ## 任务状态机
 
-`task_queue` 是系统级任务控制表，和展示用 `research_queue` 通过 `run_id` 关联。
+`task_queue` 是系统级任务控制表，也是唯一状态源。展示用 `research_queue` 只作为 prompt/projection/UI 表，通过 `run_id` 关联 `task_queue`，不保存业务状态。
 
 字段：
 
@@ -64,6 +64,13 @@ BLOCKED -> FAILED
 ```
 
 禁止直接 `PENDING -> DONE`。`RUNNING` 超过 30 分钟会被恢复为 `FAILED`，重新入队时按 `FAILED -> RETRY -> PENDING` 增加 `retry_count` 后重新领取。
+
+`research_queue` 不包含 `status` 字段。`/api/queue` 中看到的 `status` 是由 `task_queue.status` 映射生成：
+
+- `PENDING` / `RETRY` -> `pending`
+- `RUNNING` -> `in_progress`
+- `DONE` -> `complete`
+- `FAILED` / `BLOCKED` -> `blocked`
 
 ## 核心字段
 

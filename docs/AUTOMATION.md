@@ -44,6 +44,7 @@
 - 领取任务时把状态标记为 `in_progress`，避免高频自动化重复处理同一项。
 - 同时把系统级 `task_queue` 状态从 `PENDING` 切到 `RUNNING`；入库完成后切到 `DONE`。
 - `RUNNING` 超过 30 分钟会恢复为 `FAILED`，重新入队时经 `RETRY` 回到 `PENDING`。
+- `task_queue` 是唯一状态源；`research_queue` 只保存 prompt/projection/UI 字段，禁止写业务状态。
 - 每次只研究一只股票、一个任务类型。
 - strategic 任务只做战略和竞争研究，不写估值区间。
 - financial 任务必须依赖已有 strategic 底稿，可以多次刷新估值和财务结论。
