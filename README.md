@@ -25,6 +25,8 @@ MyInvestStock 是一个 A 股个股深研工作台，用来承接上游龙头研
 - 财务估值的数值区间和 signal 由 `core/valuation` 的确定性估值引擎生成，LLM 只负责构建输入和解释，不负责计算估值。
 - 财务报告合成由 `core/report` 的确定性 assembler 生成 `StockResearchReport`、`report_version` 和 `report_hash`。
 - 执行 trace 和审计由 `core/observability` 旁路记录，不改变核心报告输出。
+- 主线、ETF、行业热度和龙头确认来自 MyInvestLeader `/api/index` 的上游信号快照；本项目不重复研究主线强弱。
+- 最终展示使用“上游主线信号 + 本项目财务安全边际”的矩阵结论，避免用财务高估一票否决主线跟踪价值。
 - Web 默认端口固定为 `8016`。
 - 页面 footer 统一加载 `https://invest.okbbc.com/footer.js`。
 - `.env`、本地 SQLite、原始抓取 JSON 和临时产物不提交、不打包给外部审计。
@@ -79,6 +81,26 @@ myinveststock/web.py
 
 `StockResearchReport.valuation` 可以承接 `engine_version` 和四个 signal 分数，保证估值数值不由 prompt 临场生成。
 
+## 上游主线信号与矩阵结论
+
+MyInvestLeader 是主线研究系统，MyInvestStock 只接入其上游结果，不再重复判断主线是否成立。
+
+- 上游信号来源：`/api/index -> key_results.primary_output.items`。
+- 上游字段：`theme`、`themes`、`deep_score`、`deep_rating/deep_label`、`candidate_leader_claim`、`scores.theme_binding`、`scores.evidence_quality`、`scores.trading_structure`、`market.r5/r20/r60`、`risk_flags`。
+- 本项目字段：财务安全边际、保守合理价值区间、增长、质量、风险调整分。
+- 页面和 API 输出 `decision_matrix`，用上游主线信号与财务安全边际组合生成参与类型。
+
+矩阵规则：
+
+| 上游主线信号 | 财务安全边际 | 展示结论 |
+| --- | --- | --- |
+| 强 | 高 | 核心候选研究 |
+| 强 | 中/低 | 主线弹性跟踪，不按安全边际重仓 |
+| 弱/观察 | 高 | 价值观察，等待催化 |
+| 弱 | 低 | 风险释放优先 |
+
+财务估值模型的 `高估暂缓` 保留为原始财务标签，但页面最终结论改为矩阵解释。
+
 ## K线叠加估值区间
 
 个股页的“合理估值区间历史”优先显示近期 K 线叠加估值区间图。
@@ -123,6 +145,7 @@ LLM 不再直接承担财务估值师角色。
 - 战略深研：LLM 可以做定性研究，形成长期战略底稿，但不能写估值区间。
 - 财务深研：LLM 只构建 `assembly_input`，最终报告由 deterministic pipeline 生成。
 - 报告解释：LLM 可以解释已校验的 `StockResearchReport`，但不能修改数值、重算估值、改 grade 或引入新外部数据。
+- 主线解释：LLM 只能引用 MyInvestLeader 已入库的上游主线信号，不能在本项目重新生成主线强弱判断。
 
 ## 自动化设计
 

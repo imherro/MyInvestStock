@@ -52,6 +52,8 @@
 - strategic 任务只做战略和竞争研究，不写估值区间。
 - financial 任务必须依赖已有 strategic 底稿，可以多次刷新财务输入和确定性估值报告。
 - strategic 底稿未完成时，不提前领取对应 financial 任务。
+- 主线、ETF、行业热度和龙头确认只引用 MyInvestLeader `/api/index` 已入库的上游信号，不在本项目重新研究主线强弱。
+- financial 的 `高估暂缓` 只代表财务安全边际不足，最终页面用上游主线信号和财务安全边际矩阵解释参与类型。
 - `run_id` 由 `stock_code + task_type + research_date + schema_version` 计算，数据库唯一，防止重复研究。
 - financial 估值区间和 signal 必须由 `core/valuation` 的确定性估值引擎生成；LLM 只负责构建 assembly_input 和解释，不负责计算估值数值。
 - financial 最终报告必须由 `core/report.build_stock_report(...)` 或 `scripts/build_research_report.py` 生成，禁止手写 dict 拼装最终结构。
@@ -155,6 +157,7 @@ JSON 必须符合 `core/schema/stock_report.py` 的 `StockResearchReport`：`tas
 - 估值区间和 valuation signal 必须来自 `core/valuation` 的 deterministic engine，不允许由 LLM 凭空估算。
 - 最终 StockResearchReport 必须来自 `core/report.build_stock_report(...)`，由 assembler 生成 report_version、report_hash、valuation、peer_comparison、risk 和 conclusion。
 - 报告生成必须记录 audit trace：feature、valuation、signal、report 四个 stage 均要有 input_hash/output_hash。
+- 不重新判断主线、ETF 或行业热度；只引用 MyInvestLeader 已入库的上游信号，并说明财务安全边际与主线跟踪价值的区别。
 - 不输出交易指令、不输出现金金额、不输出股数。
 
 必须构建 assembly_input：

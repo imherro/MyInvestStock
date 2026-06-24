@@ -51,6 +51,7 @@ def load_json(value: str | None, fallback: object) -> object:
 def leader_to_summary(row: object) -> dict[str, object]:
     market = load_json(row["market_json"], {})
     scores = load_json(row["scores_json"], {})
+    upstream_signal = upstream_signal_summary(row)
     return {
         "code": row["code"],
         "name": row["name"],
@@ -69,6 +70,7 @@ def leader_to_summary(row: object) -> dict[str, object]:
         },
         "market": market,
         "scores": scores,
+        "upstream_signal": upstream_signal,
         "risk_flags": load_json(row["risk_flags_json"], []),
         "data_gaps": load_json(row["data_gaps_json"], []),
         "links": {
@@ -81,6 +83,7 @@ def leader_to_summary(row: object) -> dict[str, object]:
 
 
 def research_run_to_summary(row: object) -> dict[str, object]:
+    financial_signal = financial_signal_summary(row)
     return {
         "id": row["id"],
         "task_type": row["task_type"],
@@ -102,6 +105,7 @@ def research_run_to_summary(row: object) -> dict[str, object]:
         "annual_growth": row["annual_growth"],
         "multi_bagger_potential": row["multi_bagger_potential"],
         "heavy_position_view": row["heavy_position_view"],
+        "financial_signal": financial_signal,
         "evidence": load_json(row["evidence_json"], []),
         "assumptions": load_json(row["assumptions_json"], []),
         "risks": load_json(row["risks_json"], []),
@@ -174,6 +178,175 @@ def _num(value: object) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _signal_bucket(score: object, *, strong: float, weak: float) -> str:
+    number = _num(score)
+    if number is None:
+        return "unknown"
+    if number >= strong:
+        return "strong"
+    if number >= weak:
+        return "watch"
+    return "weak"
+
+
+def _bucket_label(bucket: str, *, kind: str) -> str:
+    if kind == "upstream":
+        return {
+            "strong": "上游主线信号强",
+            "watch": "上游主线可跟踪",
+            "weak": "上游主线偏弱",
+            "unknown": "等待上游信号",
+        }.get(bucket, "等待上游信号")
+    return {
+        "high": "财务安全边际较高",
+        "medium": "财务安全边际中性",
+        "low": "财务安全边际不足",
+        "unknown": "等待财务估值",
+    }.get(bucket, "等待财务估值")
+
+
+def upstream_signal_summary(row: object | None) -> dict[str, object]:
+    if row is None:
+        return {
+            "source": "MyInvestLeader /api/index",
+            "theme": None,
+            "bucket": "unknown",
+            "label": _bucket_label("unknown", kind="upstream"),
+            "explanation": "未找到 MyInvestLeader 入库信号。",
+        }
+    scores_value = load_json(row["scores_json"], {})
+    market_value = load_json(row["market_json"], {})
+    risk_flags_value = load_json(row["risk_flags_json"], [])
+    themes_value = load_json(row["themes_json"], [])
+    scores = scores_value if isinstance(scores_value, dict) else {}
+    market = market_value if isinstance(market_value, dict) else {}
+    risk_flags = risk_flags_value if isinstance(risk_flags_value, list) else []
+    themes = themes_value if isinstance(themes_value, list) else []
+    theme_binding = _num(scores.get("theme_binding"))
+    leader_score = _num(row["deep_score"])
+    evidence_quality = _num(scores.get("evidence_quality") or row["candidate_evidence_score"])
+    trading_structure = _num(scores.get("trading_structure"))
+
+    anchor_score = theme_binding if theme_binding is not None else leader_score
+    bucket = _signal_bucket(anchor_score, strong=80.0, weak=60.0)
+    if bucket == "strong" and leader_score is not None and leader_score < 65.0:
+        bucket = "watch"
+    label = _bucket_label(bucket, kind="upstream")
+    parts = [
+        f"主题绑定 {fmt_num(theme_binding)}",
+        f"龙头深研 {fmt_num(leader_score)}",
+        f"证据质量 {fmt_num(evidence_quality)}",
+        f"交易结构 {fmt_num(trading_structure)}",
+    ]
+    return {
+        "source": "MyInvestLeader /api/index",
+        "theme": row["theme"],
+        "themes": themes,
+        "bucket": bucket,
+        "label": label,
+        "theme_binding": theme_binding,
+        "leader_score": leader_score,
+        "evidence_quality": evidence_quality,
+        "trading_structure": trading_structure,
+        "rating": f"{row['deep_rating'] or ''} {row['deep_label'] or ''}".strip(),
+        "leader_claim": row["candidate_leader_claim"],
+        "market": {
+            "r5": market.get("r5"),
+            "r20": market.get("r20"),
+            "r60": market.get("r60"),
+            "turnover_rate": market.get("turnover_rate"),
+        },
+        "risk_flags": risk_flags,
+        "explanation": "；".join(parts),
+    }
+
+
+def financial_signal_summary(row: object | None) -> dict[str, object]:
+    if row is None:
+        return {
+            "source": "MyInvestStock deterministic valuation",
+            "bucket": "unknown",
+            "label": _bucket_label("unknown", kind="financial"),
+            "explanation": "等待财务估值深研入库。",
+        }
+    raw = load_json(_row_value(row, "raw_json"), {})
+    valuation = raw.get("valuation") if isinstance(raw, dict) else {}
+    conclusion = raw.get("conclusion") if isinstance(raw, dict) else {}
+    undervalued_score = _num(valuation.get("undervalued_score")) if isinstance(valuation, dict) else None
+    risk_adjusted_score = _num(valuation.get("risk_adjusted_score")) if isinstance(valuation, dict) else None
+    growth_score = _num(valuation.get("growth_score")) if isinstance(valuation, dict) else None
+    quality_score = _num(valuation.get("quality_score")) if isinstance(valuation, dict) else None
+    if undervalued_score is None:
+        bucket = "unknown"
+    elif undervalued_score >= 70.0:
+        bucket = "high"
+    elif undervalued_score >= 40.0:
+        bucket = "medium"
+    else:
+        bucket = "low"
+    label = _bucket_label(bucket, kind="financial")
+    return {
+        "source": "MyInvestStock deterministic valuation",
+        "bucket": bucket,
+        "label": label,
+        "undervalued_score": undervalued_score,
+        "growth_score": growth_score,
+        "quality_score": quality_score,
+        "risk_adjusted_score": risk_adjusted_score,
+        "valuation_range": {
+            "low": _row_value(row, "valuation_low"),
+            "mid": _row_value(row, "valuation_mid"),
+            "high": _row_value(row, "valuation_high"),
+            "unit": _row_value(row, "valuation_unit"),
+            "method": _row_value(row, "valuation_method"),
+        },
+        "raw_grade": _row_value(row, "heavy_position_view"),
+        "raw_summary": conclusion.get("summary") if isinstance(conclusion, dict) else None,
+        "explanation": (
+            f"财务安全 {fmt_num(undervalued_score)}；增长 {fmt_num(growth_score)}；"
+            f"质量 {fmt_num(quality_score)}；风险调整 {fmt_num(risk_adjusted_score)}"
+        ),
+    }
+
+
+def decision_matrix_summary(
+    upstream_signal: dict[str, object],
+    financial_signal: dict[str, object],
+) -> dict[str, object]:
+    upstream_bucket = str(upstream_signal.get("bucket") or "unknown")
+    financial_bucket = str(financial_signal.get("bucket") or "unknown")
+    if upstream_bucket == "unknown":
+        conclusion = "等待上游主线信号"
+        posture = "待确认"
+    elif financial_bucket == "unknown":
+        conclusion = "主线信号已入库，等待财务安全边际验证"
+        posture = "待财务深研"
+    elif upstream_bucket == "strong" and financial_bucket == "high":
+        conclusion = "上游主线强，财务安全边际较高，进入核心候选研究"
+        posture = "核心候选研究"
+    elif upstream_bucket == "strong" and financial_bucket in {"medium", "low"}:
+        conclusion = "上游主线强，但财务安全边际不足，作为主线弹性跟踪对象，不按安全边际重仓"
+        posture = "主线弹性跟踪"
+    elif upstream_bucket in {"watch", "weak"} and financial_bucket == "high":
+        conclusion = "财务安全边际较高，但上游主线信号未确认，适合作为价值观察对象等待催化"
+        posture = "价值观察"
+    elif upstream_bucket == "watch" and financial_bucket == "medium":
+        conclusion = "主线和财务都处于中性区间，继续观察趋势、估值和业绩兑现"
+        posture = "观察"
+    else:
+        conclusion = "上游主线信号偏弱且财务安全边际不足，优先等待风险释放"
+        posture = "风险释放优先"
+    return {
+        "upstream_bucket": upstream_bucket,
+        "financial_bucket": financial_bucket,
+        "upstream_label": upstream_signal.get("label"),
+        "financial_label": financial_signal.get("label"),
+        "posture": posture,
+        "conclusion": conclusion,
+        "rule": "MyInvestLeader upstream signal + MyInvestStock financial safety margin matrix",
+    }
 
 
 def score_state(value: object, *, kind: str = "default") -> str:
@@ -876,6 +1049,70 @@ def render_stock_queue_status(queue: list[object]) -> str:
       </section>"""
 
 
+def signal_item(label: str, value: object, detail: object | None = None) -> str:
+    detail_html = f"<small>{esc(detail)}</small>" if detail is not None else ""
+    return f"""<div class="signal-item">
+      <span>{esc(label)}</span>
+      <strong>{esc(value if value is not None else '待入库')}</strong>
+      {detail_html}
+    </div>"""
+
+
+def render_signal_matrix(
+    upstream_signal: dict[str, object],
+    financial_signal: dict[str, object],
+    matrix: dict[str, object],
+) -> str:
+    upstream_risk_flags = upstream_signal.get("risk_flags")
+    if not isinstance(upstream_risk_flags, list):
+        upstream_risk_flags = []
+    risk_text = "；".join(str(item) for item in upstream_risk_flags) or "暂无上游风险提示"
+    valuation_range = financial_signal.get("valuation_range")
+    range_text = "等待财务估值"
+    if isinstance(valuation_range, dict) and valuation_range.get("mid") is not None:
+        range_text = (
+            f"{fmt_num(valuation_range.get('low'))} / {fmt_num(valuation_range.get('mid'))} / "
+            f"{fmt_num(valuation_range.get('high'))}"
+        )
+    return f"""<section class="section-block">
+        <h2>主线信号与财务安全边际</h2>
+        <div class="signal-matrix">
+          <div class="signal-panel signal-panel-upstream">
+            <h3>上游主线信号</h3>
+            <p class="muted">来自 MyInvestLeader，不在本项目重复研究主线。</p>
+            <div class="signal-grid">
+              {signal_item("所属主题", upstream_signal.get("theme"))}
+              {signal_item("主线状态", upstream_signal.get("label"), upstream_signal.get("rating"))}
+              {signal_item("主题绑定", fmt_num(upstream_signal.get("theme_binding")))}
+              {signal_item("龙头深研", fmt_num(upstream_signal.get("leader_score")))}
+              {signal_item("证据质量", fmt_num(upstream_signal.get("evidence_quality")))}
+              {signal_item("交易结构", fmt_num(upstream_signal.get("trading_structure")))}
+            </div>
+            <p class="signal-note">龙头证据：{esc(upstream_signal.get("leader_claim") or "待入库")}</p>
+            <p class="signal-note">上游风险：{esc(risk_text)}</p>
+          </div>
+          <div class="signal-panel signal-panel-financial">
+            <h3>财务安全边际</h3>
+            <p class="muted">来自 MyInvestStock 确定性估值，只判断财务能否支撑安全边际。</p>
+            <div class="signal-grid">
+              {signal_item("安全边际", financial_signal.get("label"))}
+              {signal_item("估值区间", range_text, financial_signal.get("source"))}
+              {signal_item("财务安全", fmt_num(financial_signal.get("undervalued_score")))}
+              {signal_item("增长", fmt_num(financial_signal.get("growth_score")))}
+              {signal_item("质量", fmt_num(financial_signal.get("quality_score")))}
+              {signal_item("风险调整", fmt_num(financial_signal.get("risk_adjusted_score")))}
+            </div>
+            <p class="signal-note">财务模型原始标签：{esc(financial_signal.get("raw_grade") or "待入库")}</p>
+          </div>
+          <div class="matrix-conclusion">
+            <span>矩阵结论</span>
+            <strong>{esc(matrix.get("posture"))}</strong>
+            <p>{esc(matrix.get("conclusion"))}</p>
+          </div>
+        </div>
+      </section>"""
+
+
 def render_trackable_history(rows: list[object]) -> str:
     if not rows:
         return """<section class="section-block">
@@ -968,6 +1205,9 @@ def render_stock_page(code: str) -> bytes:
     stock_theme = leader["theme"] if leader is not None else "其他请求"
     stock_claim = leader["candidate_leader_claim"] if leader is not None else "主动研究请求"
     xueqiu_url = leader["xueqiu_url"] if leader is not None else None
+    upstream_signal = upstream_signal_summary(leader)
+    financial_signal = financial_signal_summary(financial_run if financial_run else None)
+    decision_matrix = decision_matrix_summary(upstream_signal, financial_signal)
     rating_label = (
         f"{leader['deep_rating'] or ''} {leader['deep_label'] or ''}".strip()
         if leader is not None
@@ -975,6 +1215,7 @@ def render_stock_page(code: str) -> bytes:
     )
     report_date = report["basis_date"] if report else ""
     queue_status_section = render_stock_queue_status(stock_queue)
+    signal_matrix_section = render_signal_matrix(upstream_signal, financial_signal, decision_matrix)
     trackable_history_section = render_trackable_history(trackable_history)
 
     history_rows = "".join(
@@ -1017,6 +1258,7 @@ def render_stock_page(code: str) -> bytes:
     </section>
     <section class="content">
       {queue_status_section}
+      {signal_matrix_section}
       {render_valuation_chart(chart_runs, chart_prices)}
       {trackable_history_section}
       <section class="two-col">
@@ -1046,7 +1288,7 @@ def render_stock_page(code: str) -> bytes:
         </div>
         <div class="section-block">
           <h2>重仓研究资格</h2>
-          <p>{esc(financial_run.get('heavy_position_view') or '等待财务估值深研入库。')}</p>
+          <p>{esc(decision_matrix.get('conclusion') or financial_run.get('heavy_position_view') or '等待财务估值深研入库。')}</p>
         </div>
       </section>
       <section class="section-block">
@@ -1131,9 +1373,14 @@ def api_latest() -> bytes:
             valuation_run_count += len(valuation_runs_for_stock)
             strategic = latest_by_task_type(runs, "strategic")
             financial = latest_by_task_type(runs, "financial")
+            leader_summary = leader_to_summary(leader)
+            decision_matrix = decision_matrix_summary(
+                leader_summary["upstream_signal"],
+                financial["financial_signal"] if financial else financial_signal_summary(None),
+            )
             stocks.append(
                 {
-                    "leader": leader_to_summary(leader),
+                    "leader": leader_summary,
                     "research": {
                         "strategic": strategic,
                         "financial": financial,
@@ -1141,6 +1388,7 @@ def api_latest() -> bytes:
                         "valuation_history": valuation_history_payload(valuation_runs_for_stock),
                         "run_count": len(runs),
                     },
+                    "decision_matrix": decision_matrix,
                 }
             )
     payload = {
@@ -1171,10 +1419,19 @@ def api_stock(code: str) -> bytes:
         trackable = rows_to_dicts(list_trackable_history(conn, code))
     for row in queue:
         row["source_label"] = queue_source_label(row.get("source_type"))
+    leader_summary = leader_to_summary(leader) if leader else None
+    financial_row = next((row for row in runs if row.get("task_type") == "financial"), None)
+    decision_matrix = decision_matrix_summary(
+        leader_summary["upstream_signal"] if leader_summary else upstream_signal_summary(None),
+        financial_signal_summary(financial_row) if financial_row else financial_signal_summary(None),
+    )
     return json.dumps(
         {
             "leader": dict(leader) if leader else None,
+            "leader_summary": leader_summary,
+            "upstream_signal": leader_summary["upstream_signal"] if leader_summary else upstream_signal_summary(None),
             "research_runs": runs,
+            "decision_matrix": decision_matrix,
             "queue": queue,
             "trackable_history": trackable,
         },

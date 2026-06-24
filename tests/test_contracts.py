@@ -32,12 +32,16 @@ from myinveststock.leader_index import (
 from myinveststock.web import (
     FOOTER_SCRIPT_URL,
     STATIC_ASSET_VERSION,
+    decision_matrix_summary,
+    financial_signal_summary,
     leader_to_summary,
     metric,
     render_layout,
     render_queue_rows,
+    render_signal_matrix,
     render_valuation_chart,
     research_run_to_summary,
+    upstream_signal_summary,
     xueqiu_stock_link,
     xueqiu_url_for_code,
 )
@@ -122,6 +126,95 @@ class ContractTests(unittest.TestCase):
         self.assertIn("metric-signal-watch", metric("PB", 3.77))
         self.assertIn("偏贵", metric("PB", 3.77))
         self.assertIn("metric-signal-neutral", metric("收盘", 106.31))
+
+    def test_upstream_signal_uses_myinvestleader_fields(self) -> None:
+        row = {
+            "code": "688256.SH",
+            "name": "寒武纪",
+            "theme": "AI算力/通信",
+            "themes_json": '["AI算力/通信","硬科技电子/半导体"]',
+            "deep_rating": "A",
+            "deep_label": "可跟踪龙头",
+            "deep_score": 73.10,
+            "shadow_observation_eligible": 1,
+            "candidate_leader_tier": "证据确认龙头",
+            "candidate_leader_claim": "国产AI芯片龙头",
+            "candidate_evidence_score": 89.0,
+            "candidate_evidence_count": 5,
+            "candidate_hard_evidence_count": 4,
+            "market_json": '{"r20": 18.5, "r60": 55.0, "turnover_rate": 4.2}',
+            "scores_json": '{"theme_binding": 91.0, "evidence_quality": 89.0, "trading_structure": 78.0}',
+            "risk_flags_json": '["估值拥挤"]',
+            "data_gaps_json": "[]",
+            "xueqiu_url": "https://xueqiu.com/S/SH688256",
+        }
+        signal = upstream_signal_summary(row)
+        summary = leader_to_summary(row)
+        self.assertEqual(signal["source"], "MyInvestLeader /api/index")
+        self.assertEqual(signal["bucket"], "strong")
+        self.assertEqual(signal["leader_claim"], "国产AI芯片龙头")
+        self.assertEqual(summary["upstream_signal"]["theme_binding"], 91.0)
+
+    def test_decision_matrix_separates_mainline_from_financial_safety(self) -> None:
+        upstream = {
+            "bucket": "strong",
+            "label": "上游主线信号强",
+        }
+        financial = {
+            "bucket": "low",
+            "label": "财务安全边际不足",
+        }
+        matrix = decision_matrix_summary(upstream, financial)
+        self.assertEqual(matrix["posture"], "主线弹性跟踪")
+        self.assertIn("不按安全边际重仓", matrix["conclusion"])
+
+    def test_financial_signal_reads_deterministic_valuation_scores(self) -> None:
+        row = {
+            "valuation_low": 79.6,
+            "valuation_mid": 103.0,
+            "valuation_high": 126.0,
+            "valuation_unit": "CNY/share",
+            "valuation_method": "PE+PB+DCF",
+            "heavy_position_view": "高估暂缓",
+            "raw_json": (
+                '{"valuation":{"undervalued_score":0,"growth_score":100,'
+                '"quality_score":18.5,"risk_adjusted_score":27.9},'
+                '"conclusion":{"summary":"确定性规则评分"}}'
+            ),
+        }
+        signal = financial_signal_summary(row)
+        self.assertEqual(signal["bucket"], "low")
+        self.assertEqual(signal["raw_grade"], "高估暂缓")
+        self.assertEqual(signal["growth_score"], 100.0)
+
+    def test_signal_matrix_section_labels_sources(self) -> None:
+        html = render_signal_matrix(
+            {
+                "theme": "AI算力/通信",
+                "label": "上游主线信号强",
+                "rating": "A 可跟踪龙头",
+                "theme_binding": 91,
+                "leader_score": 73.1,
+                "evidence_quality": 89,
+                "trading_structure": 78,
+                "leader_claim": "国产AI芯片龙头",
+                "risk_flags": [],
+            },
+            {
+                "label": "财务安全边际不足",
+                "source": "MyInvestStock deterministic valuation",
+                "undervalued_score": 0,
+                "growth_score": 100,
+                "quality_score": 18.5,
+                "risk_adjusted_score": 27.9,
+                "raw_grade": "高估暂缓",
+                "valuation_range": {"low": 79.6, "mid": 103, "high": 126},
+            },
+            {"posture": "主线弹性跟踪", "conclusion": "上游主线强，但财务安全边际不足"},
+        )
+        self.assertIn("来自 MyInvestLeader", html)
+        self.assertIn("财务模型原始标签：高估暂缓", html)
+        self.assertIn("主线弹性跟踪", html)
 
     def test_queue_rows_link_to_stock_page(self) -> None:
         html = render_queue_rows(
@@ -392,6 +485,7 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(summary["links"]["api"], "/api/stocks/603259.SH")
         self.assertEqual(summary["links"]["research_gateway"], "/research?stock=603259.SH")
         self.assertEqual(summary["market"]["close"], 106.83)
+        self.assertIn("upstream_signal", summary)
 
     def test_latest_research_summary_contract(self) -> None:
         row = {
@@ -416,11 +510,13 @@ class ContractTests(unittest.TestCase):
             "evidence_json": "[]",
             "assumptions_json": "[]",
             "risks_json": '["估值收缩"]',
+            "raw_json": '{"valuation":{"undervalued_score":75,"growth_score":60,"quality_score":70,"risk_adjusted_score":66}}',
         }
         summary = research_run_to_summary(row)
         self.assertEqual(summary["task_type"], "financial")
         self.assertEqual(summary["valuation"]["mid"], 120)
         self.assertEqual(summary["risks"], ["估值收缩"])
+        self.assertEqual(summary["financial_signal"]["bucket"], "high")
 
 
 if __name__ == "__main__":

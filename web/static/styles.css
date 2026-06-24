@@ -341,6 +341,83 @@ h2 {
   margin: 0;
 }
 
+.signal-matrix {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.signal-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.signal-panel h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.signal-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.signal-item {
+  min-height: 70px;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fbfcfe;
+}
+
+.signal-item span,
+.signal-item small,
+.signal-note,
+.matrix-conclusion span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.signal-item strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  font-size: 16px;
+}
+
+.signal-item small {
+  margin-top: 4px;
+}
+
+.signal-note {
+  margin: 0;
+}
+
+.matrix-conclusion {
+  grid-column: 1 / -1;
+  padding: 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.matrix-conclusion strong {
+  display: block;
+  margin: 4px 0;
+  color: #1d4ed8;
+  font-size: 20px;
+}
+
+.matrix-conclusion p {
+  color: #1f2937;
+}
+
 .two-col {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -541,7 +618,9 @@ tr:last-child td {
   .stock-grid,
   .two-col,
   .card-grid,
-  .summary-grid {
+  .summary-grid,
+  .signal-matrix,
+  .signal-grid {
     grid-template-columns: 1fr;
   }
 

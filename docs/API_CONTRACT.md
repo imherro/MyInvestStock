@@ -17,12 +17,14 @@ key_results.primary_output.items
 ```
 
 每个 item 表示一只当前 `A可跟踪龙头`，包含代码、名称、主题、深研评分、候选龙头证据、行情估值快照、评分和页面链接。
+`upstream_signal` 是来自 MyInvestLeader 的主线/龙头信号快照，本项目只做字段解释，不重复研究主线。
 
 关键字段：
 
 - `schema_version`: `myinveststock.index.v1`
 - `source.upstream_endpoint`: 上游固定为 `https://leader.okbbc.com/api/index`
 - `key_results.primary_output.items`: 当前主结果股票列表
+- `key_results.primary_output.items[].upstream_signal`: 上游主线信号快照，包含主题、主题绑定、龙头深研、证据质量、交易结构和风险提示
 - `key_results.primary_output.items[].links.research_gateway`: 主动研究入口 `/research?stock={code}`
 - `links.latest`: 研究成果接口 `/api/latest`
 
@@ -39,6 +41,7 @@ key_results.primary_output.items
 - `stocks[].research.strategic`: 最新战略深研底稿
 - `stocks[].research.financial`: 最新财务估值深研
 - `stocks[].research.valuation_history`: 历次估值区间
+- `stocks[].decision_matrix`: `MyInvestLeader upstream signal + MyInvestStock financial safety margin` 的矩阵结论
 
 ## `/research?stock={code}`
 
@@ -67,6 +70,9 @@ key_results.primary_output.items
 关键字段：
 
 - `leader`: 当前或历史最近一次可跟踪龙头记录，没有则为 `null`
+- `leader_summary`: 与 `/api/index` item 同形态的摘要，没有则为 `null`
+- `upstream_signal`: MyInvestLeader 上游主线信号快照
+- `decision_matrix`: 上游主线信号与本项目财务安全边际的矩阵结论
 - `research_runs`: 研究历史
 - `queue`: 该股票的队列状态
 - `trackable_history`: 该股票曾被列为 `A可跟踪龙头` 的日期、评分和报告 ID

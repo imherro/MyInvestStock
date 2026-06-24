@@ -21,6 +21,7 @@ flowchart LR
   B --> C["SQLite: leader_reports"]
   B --> D["SQLite: trackable_leaders"]
   B --> E["SQLite: research_queue"]
+  D --> U["upstream_signal: MyInvestLeader 主线/龙头快照"]
   E --> F["generate_single_stock_prompt.py"]
   F --> G1["Codex 个股战略深研"]
   F --> G2["Codex 个股财务估值深研"]
@@ -28,6 +29,7 @@ flowchart LR
   G2 --> H
   H --> I["8016 Web 个股页"]
   D --> I
+  U --> I
 ```
 
 ## 分层
@@ -38,6 +40,17 @@ flowchart LR
 - `scripts/ingest_index.py`：每日发现队列。
 - `scripts/generate_single_stock_prompt.py`：一次只生成一只股票、一个阶段的深研提示词。
 - `scripts/run_web.py`：启动 8016 本地 Web。
+
+## 上游主线信号边界
+
+MyInvestLeader 负责主线、ETF、行业热度和龙头确认。MyInvestStock 不重新研究主线强弱，只把 `/api/index` 中已经入库的主题、龙头证据、主题绑定、交易结构和风险提示整理为 `upstream_signal`。
+
+MyInvestStock 的确定性估值只回答“财务安全边际是否足够”。页面和 `/api/latest` 使用 `decision_matrix` 组合两类信号：
+
+- 上游主线强 + 财务安全高：核心候选研究。
+- 上游主线强 + 财务安全低：主线弹性跟踪，不按安全边际重仓。
+- 上游主线弱 + 财务安全高：价值观察，等待催化。
+- 上游主线弱 + 财务安全低：风险释放优先。
 
 ## Web 路由
 
