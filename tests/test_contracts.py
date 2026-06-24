@@ -104,11 +104,20 @@ class ContractTests(unittest.TestCase):
 
     def test_metric_card_includes_hover_explanation(self) -> None:
         html = metric("估值安全", 83.36)
-        self.assertIn('class="metric"', html)
+        self.assertIn('class="metric metric-signal-ok"', html)
         self.assertIn('tabindex="0"', html)
         self.assertIn('class="metric-tooltip"', html)
         self.assertIn("入口估值安全度", html)
         self.assertIn("估值相对可接受", html)
+        self.assertIn("metric-signal-ok", html)
+        self.assertIn("估值可接受", html)
+
+    def test_metric_card_signal_classes_reflect_indicator_state(self) -> None:
+        self.assertIn("metric-signal-safe", metric("证据质量", 89.25))
+        self.assertIn("证据可信", metric("证据质量", 89.25))
+        self.assertIn("metric-signal-watch", metric("PB", 3.77))
+        self.assertIn("偏贵", metric("PB", 3.77))
+        self.assertIn("metric-signal-neutral", metric("收盘", 106.31))
 
     def test_queue_rows_link_to_stock_page(self) -> None:
         html = render_queue_rows(

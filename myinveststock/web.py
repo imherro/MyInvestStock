@@ -213,6 +213,43 @@ def score_state(value: object, *, kind: str = "default") -> str:
     return "偏弱"
 
 
+def score_signal(value: object, *, kind: str = "default") -> tuple[str, str]:
+    number = _num(value)
+    if number is None:
+        return "unknown", "待入库"
+    if kind == "valuation_safety":
+        if number >= 85:
+            return "safe", "低估/安全"
+        if number >= 70:
+            return "ok", "估值可接受"
+        if number >= 50:
+            return "watch", "估值中性"
+        return "danger", "估值危险"
+    if kind == "evidence_quality":
+        if number >= 85:
+            return "safe", "证据可信"
+        if number >= 70:
+            return "ok", "证据较足"
+        if number >= 60:
+            return "watch", "需确认"
+        return "danger", "证据偏弱"
+    if kind == "deep_score":
+        if number >= 80:
+            return "safe", "高优先级"
+        if number >= 70:
+            return "ok", "可跟踪"
+        if number >= 60:
+            return "watch", "观察"
+        return "danger", "低优先"
+    if number >= 85:
+        return "safe", "强"
+    if number >= 70:
+        return "ok", "较好"
+    if number >= 60:
+        return "watch", "中性"
+    return "danger", "偏弱"
+
+
 def ratio_state(label: str, value: object) -> str:
     number = _num(value)
     if number is None:
@@ -236,6 +273,31 @@ def ratio_state(label: str, value: object) -> str:
             return "较高市净率，需高 ROE 支撑"
         return "高市净率，需强盈利质量支撑"
     return "行情快照"
+
+
+def ratio_signal(label: str, value: object) -> tuple[str, str]:
+    number = _num(value)
+    if number is None:
+        return "unknown", "待入库"
+    if label == "PE TTM":
+        if number <= 0:
+            return "danger", "亏损/异常"
+        if number < 15:
+            return "safe", "低估"
+        if number < 30:
+            return "ok", "合理"
+        if number < 60:
+            return "watch", "偏贵"
+        return "danger", "危险"
+    if label == "PB":
+        if number < 1:
+            return "safe", "资产折价"
+        if number < 3:
+            return "ok", "合理"
+        if number < 6:
+            return "watch", "偏贵"
+        return "danger", "危险"
+    return "neutral", "行情快照"
 
 
 def metric_explanation(label: str, value: object) -> tuple[str, str]:
@@ -267,13 +329,29 @@ def metric_explanation(label: str, value: object) -> tuple[str, str]:
     return ("指标说明", "入口展示指标，用于辅助筛选和跟踪。")
 
 
+def metric_signal(label: str, value: object) -> tuple[str, str]:
+    if label in {"深研", "深研分"}:
+        return score_signal(value, kind="deep_score")
+    if label == "收盘":
+        return "neutral", "行情快照"
+    if label in {"PE TTM", "PB"}:
+        return ratio_signal(label, value)
+    if label == "证据质量":
+        return score_signal(value, kind="evidence_quality")
+    if label == "估值安全":
+        return score_signal(value, kind="valuation_safety")
+    return "neutral", "参考"
+
+
 def metric(label: str, value: object, unit: str = "") -> str:
     shown = fmt_num(value) if isinstance(value, (int, float)) else esc(value or "待入库")
     tooltip_title, tooltip_body = metric_explanation(label, value)
+    signal_class, signal_label = metric_signal(label, value)
     tooltip_text = f"{tooltip_title}：{tooltip_body}"
-    return f"""<div class="metric" tabindex="0" title="{esc(tooltip_text)}" aria-label="{esc(label)}：{esc(shown)}{esc(unit)}。{esc(tooltip_text)}">
+    return f"""<div class="metric metric-signal-{esc(signal_class)}" tabindex="0" title="{esc(tooltip_text)}" aria-label="{esc(label)}：{esc(shown)}{esc(unit)}。{esc(signal_label)}。{esc(tooltip_text)}">
       <span>{esc(label)}</span>
       <strong>{shown}{esc(unit)}</strong>
+      <small class="metric-signal-label">{esc(signal_label)}</small>
       <div class="metric-tooltip" role="tooltip">
         <b>{esc(tooltip_title)}</b>
         <em>{esc(tooltip_body)}</em>

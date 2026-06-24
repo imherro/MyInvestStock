@@ -216,6 +216,31 @@ h2 {
   transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
 
+.metric-signal-safe {
+  border-color: #99d6cd;
+  background: #ecfdf5;
+}
+
+.metric-signal-ok {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.metric-signal-watch {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.metric-signal-danger {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.metric-signal-neutral,
+.metric-signal-unknown {
+  background: #fbfcfe;
+}
+
 .metric:hover,
 .metric:focus-visible {
   z-index: 5;
@@ -229,6 +254,38 @@ h2 {
   margin-top: 6px;
   font-size: 18px;
   overflow-wrap: anywhere;
+}
+
+.metric-signal-label {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.35;
+  border: 1px solid rgba(100, 116, 139, 0.18);
+}
+
+.metric-signal-safe .metric-signal-label {
+  color: #047857;
+  border-color: rgba(4, 120, 87, 0.22);
+}
+
+.metric-signal-ok .metric-signal-label {
+  color: #1d4ed8;
+  border-color: rgba(29, 78, 216, 0.2);
+}
+
+.metric-signal-watch .metric-signal-label {
+  color: #92400e;
+  border-color: rgba(146, 64, 14, 0.22);
+}
+
+.metric-signal-danger .metric-signal-label {
+  color: #b91c1c;
+  border-color: rgba(185, 28, 28, 0.22);
 }
 
 .metric-tooltip {
