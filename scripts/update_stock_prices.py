@@ -14,7 +14,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 from myinveststock.config import DB_PATH
-from myinveststock.db import connect, init_db, list_latest_leaders, upsert_daily_prices
+from myinveststock.db import connect, init_db, list_latest_leaders, list_price_refresh_subjects, upsert_daily_prices
 
 
 def load_env_token() -> str | None:
@@ -66,10 +66,22 @@ def tracked_codes() -> list[tuple[str, str]]:
         return [(row["code"], row["name"]) for row in list_latest_leaders(conn)]
 
 
+def system_codes() -> list[tuple[str, str]]:
+    init_db(DB_PATH)
+    with connect(DB_PATH) as conn:
+        return [(row["code"], row["name"]) for row in list_price_refresh_subjects(conn)]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Refresh local A-share daily price cache for stock chart overlays.")
     parser.add_argument("--code", action="append", help="Stock code such as 600519.SH. Can be repeated.")
-    parser.add_argument("--tracked", action="store_true", help="Refresh the latest /api/index A trackable leaders.")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--tracked", action="store_true", help="Refresh only the latest /api/index A trackable leaders.")
+    mode.add_argument(
+        "--all-system",
+        action="store_true",
+        help="Refresh every stock already present in leader history, research queue, or research runs.",
+    )
     parser.add_argument("--days", type=int, default=360, help="Calendar-day lookback when --start-date is omitted.")
     parser.add_argument("--start-date", help="Inclusive start date, YYYY-MM-DD.")
     parser.add_argument("--end-date", default=datetime.now().date().isoformat(), help="Inclusive end date, YYYY-MM-DD.")
@@ -77,8 +89,10 @@ def main() -> int:
     args = parser.parse_args()
 
     codes: list[tuple[str, str]] = []
-    if args.tracked or not args.code:
+    if args.tracked:
         codes.extend(tracked_codes())
+    elif args.all_system or not args.code:
+        codes.extend(system_codes())
     if args.code:
         known = {code for code, _ in codes}
         codes.extend((code, "") for code in args.code if code not in known)

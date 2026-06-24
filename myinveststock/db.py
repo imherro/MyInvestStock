@@ -812,6 +812,57 @@ def list_trackable_history(conn: sqlite3.Connection, code: str) -> list[sqlite3.
     )
 
 
+def list_price_refresh_subjects(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return list(
+        conn.execute(
+            """
+            WITH latest_report_id AS (
+                SELECT report_id
+                FROM leader_reports
+                WHERE COALESCE(schema_version, '') != 'manual_research_request.v1'
+                ORDER BY COALESCE(generated_at, fetched_at) DESC, fetched_at DESC
+                LIMIT 1
+            ),
+            subjects AS (
+                SELECT code, name, 1 AS priority, 'latest_trackable' AS source
+                FROM trackable_leaders
+                WHERE report_id IN (SELECT report_id FROM latest_report_id)
+
+                UNION ALL
+
+                SELECT code, name, 2 AS priority, 'queue' AS source
+                FROM research_queue
+
+                UNION ALL
+
+                SELECT code, name, 3 AS priority, 'research' AS source
+                FROM stock_research_runs
+
+                UNION ALL
+
+                SELECT code, name, 4 AS priority, 'trackable_history' AS source
+                FROM trackable_leaders
+            )
+            SELECT
+                code,
+                COALESCE(
+                    NULLIF(MAX(CASE WHEN priority = 1 THEN name END), ''),
+                    NULLIF(MAX(CASE WHEN priority = 2 THEN name END), ''),
+                    NULLIF(MAX(CASE WHEN priority = 3 THEN name END), ''),
+                    NULLIF(MAX(CASE WHEN priority = 4 THEN name END), ''),
+                    ''
+                ) AS name,
+                MIN(priority) AS source_priority,
+                GROUP_CONCAT(DISTINCT source) AS sources
+            FROM subjects
+            WHERE COALESCE(code, '') != ''
+            GROUP BY code
+            ORDER BY source_priority ASC, code ASC
+            """
+        )
+    )
+
+
 def _queue_status_case() -> str:
     return """
         CASE t.status

@@ -88,11 +88,12 @@ myinveststock/web.py
 - K 线默认使用前复权 `qfq` 口径，作为价格参照层，不参与估值计算。
 - 合理估值区间仍由确定性估值引擎和报告 assembler 生成。
 - 如果某只股票还没有 K 线缓存，页面自动降级为纯估值历史图。
+- 默认刷新范围覆盖最新可跟踪龙头、历史可跟踪龙头、研究队列和已有研究记录中的股票。
 
-刷新当前 A 可跟踪龙头的近期 K 线：
+刷新系统内相关股票的近期 K 线：
 
 ```powershell
-python scripts/update_stock_prices.py --tracked
+python scripts/update_stock_prices.py --all-system
 ```
 
 ## 确定性报告组装
@@ -245,7 +246,7 @@ python scripts/ingest_index.py
 刷新 K 线缓存：
 
 ```powershell
-python scripts/update_stock_prices.py --tracked
+python scripts/update_stock_prices.py --all-system
 ```
 
 启动 Web：

@@ -11,9 +11,13 @@ from myinveststock.db import (
     connect,
     init_db,
     list_daily_prices,
+    list_price_refresh_subjects,
     list_queue,
     latest_report,
     upsert_daily_prices,
+    upsert_queue_item,
+    upsert_report,
+    upsert_trackable_leader,
 )
 from myinveststock.leader_index import (
     build_requested_financial_prompt,
@@ -289,6 +293,78 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(count, 2)
             self.assertEqual([row["trade_date"] for row in rows], ["2026-06-21", "2026-06-22"])
             self.assertEqual(rows[0]["adj"], "qfq")
+
+    def test_price_refresh_subjects_include_queue_runs_and_history(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "subjects.sqlite"
+            init_db(db_path)
+            with closing(connect(db_path)) as conn:
+                upsert_report(
+                    conn,
+                    report_id="leader_review_2026-06-23",
+                    schema_version="leader.v1",
+                    generated_at="2026-06-23T18:50:00+08:00",
+                    basis_date="2026-06-23",
+                    theme_report_id=None,
+                    source_url="https://leader.okbbc.com/api/index",
+                    fetched_at="2026-06-23T11:00:00+00:00",
+                    raw_path=None,
+                )
+                upsert_report(
+                    conn,
+                    report_id="leader_review_2026-06-24",
+                    schema_version="leader.v1",
+                    generated_at="2026-06-24T18:50:00+08:00",
+                    basis_date="2026-06-24",
+                    theme_report_id=None,
+                    source_url="https://leader.okbbc.com/api/index",
+                    fetched_at="2026-06-24T11:00:00+00:00",
+                    raw_path=None,
+                )
+                upsert_trackable_leader(
+                    conn,
+                    report_id="leader_review_2026-06-23",
+                    item={"code": "688256.SH", "name": "寒武纪"},
+                    created_at="2026-06-23T11:00:00+00:00",
+                )
+                upsert_trackable_leader(
+                    conn,
+                    report_id="leader_review_2026-06-24",
+                    item={"code": "603259.SH", "name": "药明康德"},
+                    created_at="2026-06-24T11:00:00+00:00",
+                )
+                upsert_queue_item(
+                    conn,
+                    report_id="leader_review_2026-06-24",
+                    code="002594.SZ",
+                    name="比亚迪",
+                    priority=1,
+                    stage=1,
+                    task_type="strategic",
+                    task_keyword="MyInvestStock 个股战略深研 002594.SZ 比亚迪",
+                    prompt="研究提示词",
+                    depends_on_task_type=None,
+                    task_date="2026-06-24",
+                    now="2026-06-24T11:00:00+00:00",
+                    source_type=QUEUE_SOURCE_REQUEST,
+                )
+                conn.execute(
+                    """
+                    INSERT INTO stock_research_runs (
+                        code, name, task_type, research_date, created_at, status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    ("300750.SZ", "宁德时代", "financial", "2026-06-24", "2026-06-24T11:00:00+00:00", "complete"),
+                )
+                rows = list_price_refresh_subjects(conn)
+
+            subjects = {row["code"]: dict(row) for row in rows}
+            self.assertEqual(list(subjects), ["603259.SH", "002594.SZ", "300750.SZ", "688256.SH"])
+            self.assertIn("latest_trackable", subjects["603259.SH"]["sources"])
+            self.assertIn("queue", subjects["002594.SZ"]["sources"])
+            self.assertIn("research", subjects["300750.SZ"]["sources"])
+            self.assertIn("trackable_history", subjects["688256.SH"]["sources"])
 
     def test_index_leader_summary_contract(self) -> None:
         row = {
