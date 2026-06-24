@@ -47,10 +47,10 @@
 - `task_queue` 是唯一状态源；`research_queue` 只保存 prompt/projection/UI 字段，禁止写业务状态。
 - 每次只研究一只股票、一个任务类型。
 - strategic 任务只做战略和竞争研究，不写估值区间。
-- financial 任务必须依赖已有 strategic 底稿，可以多次刷新估值和财务结论。
+- financial 任务必须依赖已有 strategic 底稿，可以多次刷新财务输入和确定性估值报告。
 - strategic 底稿未完成时，不提前领取对应 financial 任务。
 - `run_id` 由 `stock_code + task_type + research_date + schema_version` 计算，数据库唯一，防止重复研究。
-- financial 估值区间和 signal 必须由 `core/valuation` 的确定性估值引擎生成；LLM 只负责解释，不负责计算估值数值。
+- financial 估值区间和 signal 必须由 `core/valuation` 的确定性估值引擎生成；LLM 只负责构建 assembly_input 和解释，不负责计算估值数值。
 - financial 最终报告必须由 `core/report.build_stock_report(...)` 或 `scripts/build_research_report.py` 生成，禁止手写 dict 拼装最终结构。
 - financial 生成报告时必须开启旁路 trace，使用 `scripts/build_research_report.py --audit-db data/local/myinveststock.sqlite ...` 或等价的 `TraceRecorder + record_trace_events`。
 - 如果队列为空，汇报队列为空，不生成研究正文。
@@ -66,7 +66,7 @@
 1. 在本地队列中领取下一条 pending 任务，优先使用 python scripts/generate_single_stock_prompt.py --next --claim 生成本次唯一研究提示词，并把任务标记为 in_progress。
 2. 如果没有待研究任务，验证 http://127.0.0.1:8016/api/index 和 http://127.0.0.1:8016/api/latest 可用后，汇报“队列为空”，本次结束。
 3. 如果领取到 strategic 任务：只研究这一只股票的行业位置、市场空间、竞争格局、上下游、战略壁垒、五倍/十倍潜力和战略证伪条件；不写估值区间，不写买卖建议；输出 task_type='strategic' 的结构化 JSON，并通过 scripts/import_research_run.py 入库。
-4. 如果领取到 financial 任务：先确认该股票已有 task_type='strategic' 的战略底稿；如果没有战略底稿，把该 financial 任务标记为 blocked，并停止；如果有战略底稿，只研究财务质量、增长率、估值方法、合理估值区间、当前价格位置、五倍/十倍潜力财务校验、重仓研究资格和财务证伪条件；先形成结构化 assembly input，再通过 core/report.build_stock_report(...) 或 scripts/build_research_report.py 生成 task_type='financial' 的最终 JSON，并写入 audit_log trace，然后通过 scripts/import_research_run.py 入库。
+4. 如果领取到 financial 任务：先确认该股票已有 task_type='strategic' 的战略底稿；如果没有战略底稿，把该 financial 任务标记为 blocked，并停止；如果有战略底稿，只收集和整理财务、估值模型输入、同业样本、风险信号和证据，形成结构化 assembly_input；再通过 core/report.build_stock_report(...) 或 scripts/build_research_report.py 生成 task_type='financial' 的最终 JSON，并写入 audit_log trace，然后通过 scripts/import_research_run.py 入库。不要手写最终 StockResearchReport。
 
 数据原则：
 - Tushare 是 A 股结构化主源，使用本地 .env，但不要输出任何 token。
@@ -121,12 +121,12 @@
 JSON 必须符合 `core/schema/stock_report.py` 的 `StockResearchReport`：`task_type` 为 `strategic`，`valuation.intrinsic_value_low/mid/high` 均为 `null`，禁止额外字段。
 ```
 
-## 个股财务估值深研提示词
+## 个股财务估值深研输入构建提示词
 
-用途：一次只研究一只股票的财务、估值和价格位置，并把估值区间叠加入库。
+用途：一次只研究一只股票的财务结构化输入，并把确定性系统生成的估值区间叠加入库。
 
 ```text
-在 C:\Users\kunpeng\Documents\MyInvestStock 中执行个股财务估值深研。
+在 C:\Users\kunpeng\Documents\MyInvestStock 中执行个股财务估值深研输入构建。
 
 唯一研究对象：{code} {name}。
 
@@ -146,24 +146,26 @@ JSON 必须符合 `core/schema/stock_report.py` 的 `StockResearchReport`：`tas
 - Tushare 是 A 股财务、行情、估值结构化主源。
 - 网络资料只用于补充财务口径、行业数据或管理层表述。
 - 本任务可以多次重复执行，用最新财务、估值和价格数据刷新结论。
-- 本任务专注财务质量、增长质量、估值区间和重仓研究资格，不重复写泛行业故事。
+- 本任务只构建 deterministic report 所需的 assembly_input，不直接生成最终 StockResearchReport。
+- LLM 只能负责搜集、清洗、归一化输入和解释脚本输出；不能重新计算估值，不能给出新的 grade。
 - 估值区间和 valuation signal 必须来自 `core/valuation` 的 deterministic engine，不允许由 LLM 凭空估算。
 - 最终 StockResearchReport 必须来自 `core/report.build_stock_report(...)`，由 assembler 生成 report_version、report_hash、valuation、peer_comparison、risk 和 conclusion。
 - 报告生成必须记录 audit trace：feature、valuation、signal、report 四个 stage 均要有 input_hash/output_hash。
 - 不输出交易指令、不输出现金金额、不输出股数。
 
-必须覆盖：
-- 财务质量：收入、利润、毛利率、净利率、ROE、现金流、负债质量。
-- 年增长率：近年收入/利润增速、未来增长假设、增长可信度。
-- 估值方法：按行业属性选择 PE、PEG、PB、PS、DCF 或分部估值。
-- 合理估值区间：保守、合理、乐观三档，必须说明关键假设和触发条件。
-- 当前价格位置：只判断高估、合理、低估或观察，不给买卖指令。
-- 五倍/十倍潜力校验：用财务和估值条件验证战略深研中的潜力判断。
-- 重仓资格：只能写研究标签，如 不具备、观察、可跟踪、核心仓研究资格、高估暂缓。
-- 财务证伪条件：什么财务或估值数据出现后说明判断错了。
+必须构建 assembly_input：
+- 财务输入：收入、利润、毛利率、ROE、现金流、负债、market_cap 等结构化字段。
+- 估值输入：current_price, stock_pe/pe, pb, eps, book_value_per_share, industry_pb, fcf_per_share, weights 等模型输入。
+- 同业输入：同业 stock_code、pe、roe 和样本选择理由。
+- 风险输入：financial_risk、industry_risk、sentiment_risk、invalidation_conditions。
+- 解释性输入：行业地位、竞争格局、上下游、年增长率、五倍/十倍潜力校验可以作为文字输入，但不允许覆盖系统最终结论。
 
-完成后输出结构化 JSON，并通过 `scripts/import_research_run.py` 入库为 task_type='financial'，保证 /stocks/{code} 能看到估值区间历史叠加。
-JSON 必须符合 `core/schema/stock_report.py` 的 `StockResearchReport`：`task_type` 为 `financial`，`valuation.intrinsic_value_low/mid/high` 必须全部为数字且 `low <= mid <= high`，禁止额外字段。
+执行流程：
+1. 收集 Tushare 和必要网络补充资料，形成 assembly_input JSON。
+2. 将 assembly_input 写入 temp/assembly_inputs/{code}_financial_{basis_date}.json。
+3. 运行 python scripts/build_research_report.py --audit-db data/local/myinveststock.sqlite temp/assembly_inputs/{code}_financial_{basis_date}.json > temp/reports/{code}_financial_{basis_date}.json。
+4. 用 python scripts/import_research_run.py temp/reports/{code}_financial_{basis_date}.json 入库。
+5. 导入成功后，汇报 run_id、report_hash、audit_log stage 覆盖、verify_run 结果和系统生成的主要结论摘要。
 ```
 
 ## 建议节奏
@@ -175,3 +177,27 @@ JSON 必须符合 `core/schema/stock_report.py` 的 `StockResearchReport`：`tas
 3. 如果没有战略底稿，先做战略深研。
 4. 战略底稿已存在后，多次做财务估值深研。
 5. 研究完一条就结束，下一次自动化再领取下一条，直到队列为空。
+
+## 报告解释器提示词
+
+用途：把已经入库或已生成的 `StockResearchReport` 翻译成人类可读解释。解释器不参与计算。
+
+```text
+你是 A 股研究报告解释器。
+
+输入是已经通过 schema 校验的 StockResearchReport。你的任务是解释，不是计算。
+
+禁止：
+- 不得修改任何数值、估值区间、signal、grade、report_hash 或 run_id。
+- 不得重新估值。
+- 不得引入新外部数据。
+- 不得给出新的买卖建议、现金金额或股数。
+- 不得用自己的判断覆盖系统结论。
+
+输出只做五件事：
+1. 解释核心财务状态。
+2. 解释已有估值区间和 signal 的含义。
+3. 解释 risk 字段中的主要风险来源。
+4. 解释系统为什么给出当前 heavy_position_view / conclusion.grade。
+5. 用通俗语言总结结论。
+```

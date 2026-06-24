@@ -20,7 +20,7 @@ from .db import (
 STOCK_CODE_RE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
 
 
-STOCK_REPORT_SCHEMA_INSTRUCTION = """结构化输出要求：
+STOCK_REPORT_SCHEMA_INSTRUCTION = """StockResearchReport 结构化输出要求：
 - 最终只输出一个 JSON object，不要输出 Markdown 包裹。
 - JSON 必须符合 core/schema/stock_report.py 中 StockResearchReport。
 - 顶层字段固定为：schema_version, report_version, report_hash, run_id, stock_code, stock_name, source_report_id, task_type, research_date, status, title, summary, industry_position, competition_landscape, upstream_downstream, annual_growth, multi_bagger_potential, heavy_position_view, fundamentals, valuation, peer_comparison, risk, conclusion, evidence, assumptions。
@@ -37,6 +37,40 @@ STOCK_REPORT_SCHEMA_INSTRUCTION = """结构化输出要求：
 - assumptions 是字符串数组。
 - heavy_position_view/grade 只能是：不具备、观察、可跟踪、核心仓研究资格、高估暂缓。
 - status 只能是 complete、draft、blocked；confidence 只能是 low、medium、high。"""
+
+
+FINANCIAL_ASSEMBLY_INPUT_INSTRUCTION = """financial assembly_input 结构化要求：
+- 你的角色是财务结构化输入构建器，不是估值师，也不是最终报告生成器。
+- 不要手写最终 StockResearchReport；最终报告必须由 scripts/build_research_report.py 或 core/report.build_stock_report(...) 生成。
+- 不要重新计算估值区间，不要修改 deterministic engine 产出的 valuation、peer_comparison、risk、conclusion、report_hash。
+- assembly_input 必须是一个 JSON object，至少包含 stock_code, stock_name, source_report_id, task_type, research_date, financial_rows, valuation_inputs, peers, risk_signals。
+- task_type 固定为 financial；research_date 使用入口 basis_date。
+- financial_rows 只放结构化财务输入，例如 revenue, net_profit, equity, gross_margin, debt, free_cash_flow, market_cap；缺失字段必须显式说明到 evidence 或 assumptions，不要编造。
+- valuation_inputs 只放估值模型输入，例如 current_price, stock_pe/pe, pb, eps, book_value_per_share, industry_pb, fcf_per_share, weights；这些是模型输入，不是最终估值结论。
+- peers 只放同业样本输入，例如 stock_code, pe, roe；同业选择口径写入 assumptions 或 evidence。
+- risk_signals 只放可解释风险输入，例如 financial_risk, industry_risk, sentiment_risk, invalidation_conditions。
+- 可包含 title, summary, industry_position, competition_landscape, upstream_downstream, annual_growth, multi_bagger_potential, evidence, assumptions 作为解释性输入，但这些字段不能覆盖 deterministic valuation 或 conclusion。
+- 所有来源必须进入 evidence：source, date, url, purpose, detail。
+- 禁止输出交易指令、现金金额、股数或买卖建议。"""
+
+
+REPORT_EXPLAINER_INSTRUCTION = """你是 A 股研究报告解释器。
+
+输入是已经通过 schema 校验的 StockResearchReport。你的任务是解释，不是计算。
+
+禁止：
+- 不得修改任何数值、估值区间、signal、grade、report_hash 或 run_id。
+- 不得重新估值。
+- 不得引入新外部数据。
+- 不得给出新的买卖建议、现金金额或股数。
+- 不得用自己的判断覆盖系统结论。
+
+输出只做五件事：
+1. 解释核心财务状态。
+2. 解释已有估值区间和 signal 的含义。
+3. 解释 risk 字段中的主要风险来源。
+4. 解释系统为什么给出当前 heavy_position_view / conclusion.grade。
+5. 用通俗语言总结结论。"""
 
 
 def fetch_index(url: str = LEADER_INDEX_URL, timeout: int = 30) -> dict[str, Any]:
@@ -140,7 +174,7 @@ def build_financial_prompt(item: dict[str, Any], report: dict[str, Any]) -> str:
     theme = item.get("theme") or ""
     report_id = report["report_id"]
     basis_date = report.get("basis_date") or ""
-    return f"""在 C:\\Users\\kunpeng\\Documents\\MyInvestStock 中执行个股财务估值深研。
+    return f"""在 C:\\Users\\kunpeng\\Documents\\MyInvestStock 中执行个股财务估值深研输入构建。
 
 唯一研究对象：{code} {name}。
 
@@ -160,30 +194,40 @@ def build_financial_prompt(item: dict[str, Any], report: dict[str, Any]) -> str:
 - Tushare 是 A 股财务、行情、估值结构化主源。
 - 网络资料只用于补充财务口径、行业数据或管理层表述。
 - 本任务可以多次重复执行，用最新财务、估值和价格数据刷新结论。
-- 本任务专注财务质量、增长质量、估值区间和重仓研究资格，不重复写泛行业故事。
+- 本任务只构建 deterministic report 所需的 assembly_input，不直接生成最终 StockResearchReport。
+- LLM 只能负责搜集、清洗、归一化输入和解释脚本输出；不能重新计算估值，不能给出新的 grade。
 - 不输出交易指令、不输出现金金额、不输出股数。
 
-必须覆盖：
-- 财务质量：收入、利润、毛利率、净利率、ROE、现金流、负债质量。
-- 年增长率：近年收入/利润增速、未来增长假设、增长可信度。
-- 估值方法：按行业属性选择 PE、PEG、PB、PS、DCF 或分部估值。
-- 合理估值区间：保守、合理、乐观三档，必须说明关键假设和触发条件。
-- 当前价格位置：只判断高估、合理、低估或观察，不给买卖指令。
-- 五倍/十倍潜力校验：用财务和估值条件验证战略深研中的潜力判断。
-- 重仓资格：只能写研究标签，如 不具备、观察、可跟踪、核心仓研究资格、高估暂缓。
-- 财务证伪条件：什么财务或估值数据出现后说明判断错了。
+必须构建 assembly_input：
+- 财务输入：收入、利润、毛利率、ROE、现金流、负债、market_cap 等结构化字段。
+- 估值输入：current_price, stock_pe/pe, pb, eps, book_value_per_share, industry_pb, fcf_per_share, weights 等模型输入。
+- 同业输入：同业 stock_code、pe、roe 和样本选择理由。
+- 风险输入：financial_risk、industry_risk、sentiment_risk、invalidation_conditions。
+- 解释性输入：行业地位、竞争格局、上下游、年增长率、五倍/十倍潜力校验可以作为文字输入，但不允许覆盖系统最终结论。
 
-财务估值深研 schema 规则：
-- task_type 必须为 financial。
-- valuation.intrinsic_value_low / intrinsic_value_mid / intrinsic_value_high 必须全部为数字，且 low <= mid <= high。
-- valuation.unit 默认使用 CNY/share。
-- valuation 区间和 valuation signal 必须来自 core/valuation 的 deterministic engine；LLM 只负责解释结论，不允许凭空生成估值数值。
-- 最终 StockResearchReport 必须来自 core/report.build_stock_report(...) 或 scripts/build_research_report.py；不要手写 dict 拼装 valuation、peer_comparison、risk、conclusion。
-- 使用 scripts/build_research_report.py 时必须带 --audit-db data/local/myinveststock.sqlite，或使用 TraceRecorder + record_trace_events 写入 audit_log。
+执行流程：
+1. 收集 Tushare 和必要网络补充资料，形成 assembly_input JSON。
+2. 将 assembly_input 写入 temp/assembly_inputs/{code}_financial_{basis_date}.json。
+3. 运行 python scripts/build_research_report.py --audit-db data/local/myinveststock.sqlite temp/assembly_inputs/{code}_financial_{basis_date}.json > temp/reports/{code}_financial_{basis_date}.json。
+4. 用 python scripts/import_research_run.py temp/reports/{code}_financial_{basis_date}.json 入库。
+5. 导入成功后，汇报 run_id、report_hash、audit_log stage 覆盖、verify_run 结果和系统生成的主要结论摘要。
 
-{STOCK_REPORT_SCHEMA_INSTRUCTION}
+{FINANCIAL_ASSEMBLY_INPUT_INSTRUCTION}
 
-完成后将 task_type='financial' 的结构化结果写入 stock_research_runs，并保证 /stocks/{code} 能看到估值区间历史叠加。"""
+完成后保证 /stocks/{code} 能看到由 deterministic pipeline 生成并入库的估值区间历史叠加。"""
+
+
+def build_report_explainer_prompt(report_output: dict[str, Any] | str) -> str:
+    report_text = (
+        report_output
+        if isinstance(report_output, str)
+        else json.dumps(report_output, ensure_ascii=False, indent=2, sort_keys=True)
+    )
+    return f"""{REPORT_EXPLAINER_INSTRUCTION}
+
+StockResearchReport:
+{report_text}
+"""
 
 
 def ingest_payload(

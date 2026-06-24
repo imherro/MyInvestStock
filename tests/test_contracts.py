@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from myinveststock.leader_index import build_financial_prompt, build_strategic_prompt, primary_items, report_meta
+from myinveststock.leader_index import (
+    build_financial_prompt,
+    build_report_explainer_prompt,
+    build_strategic_prompt,
+    primary_items,
+    report_meta,
+)
 from myinveststock.web import (
     FOOTER_SCRIPT_URL,
     STATIC_ASSET_VERSION,
@@ -45,8 +51,19 @@ class ContractTests(unittest.TestCase):
         item = {"code": "600519.SH", "name": "贵州茅台", "theme": "消费/传媒"}
         prompt = build_financial_prompt(item, report)
         self.assertIn("task_type='strategic'", prompt)
-        self.assertIn("task_type='financial'", prompt)
-        self.assertIn("合理估值区间", prompt)
+        self.assertIn("task_type 固定为 financial", prompt)
+        self.assertIn("assembly_input", prompt)
+        self.assertIn("不要手写最终 StockResearchReport", prompt)
+        self.assertIn("scripts/build_research_report.py --audit-db", prompt)
+        self.assertIn("不能重新计算估值", prompt)
+
+    def test_report_explainer_prompt_is_interpreter_only(self) -> None:
+        prompt = build_report_explainer_prompt({"stock_code": "600519.SH", "report_hash": "abc"})
+        self.assertIn("A 股研究报告解释器", prompt)
+        self.assertIn("不得修改任何数值", prompt)
+        self.assertIn("不得重新估值", prompt)
+        self.assertIn("不得引入新外部数据", prompt)
+        self.assertIn('"stock_code": "600519.SH"', prompt)
 
     def test_report_id_required(self) -> None:
         with self.assertRaises(ValueError):
