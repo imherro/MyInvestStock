@@ -11,7 +11,7 @@
 
 ## 推荐龙头读取入队自动化
 
-用途：每天在市场研究、主线研究、龙头研究完成之后，读取 `/api/index`，更新今日待研队列，不做深研。
+用途：每天在市场研究、主线研究、龙头研究完成之后，读取 Leader `/api/index` 的可跟踪龙头，并同步 Theme `/api/index` 的主线环境快照，更新今日待研队列，不做深研。
 
 规则：
 
@@ -25,15 +25,17 @@
 ```text
 执行 MyInvestStock 推荐龙头读取入队。
 
-触发前提：这是市场研究、主线研究、龙头研究完成之后的下游入口更新任务。先检查 https://leader.okbbc.com/api/index 是否已经更新完成。只接受 /api/index 中 report.basis_date 已经是最新完整数据可用的交易日，且 key_results.primary_output.items 非空的结果。如果 /api/index 未更新、为空、请求失败，或 report_id 与上一轮完全相同且本地队列已处理过，则停止并汇报原因。
+触发前提：这是市场研究、主线研究、龙头研究完成之后的下游入口更新任务。先检查 https://leader.okbbc.com/api/index 是否已经更新完成。只接受 Leader /api/index 中 report.basis_date 已经是最新完整数据可用的交易日，且 key_results.primary_output.items 非空的结果。如果 Leader /api/index 未更新、为空、请求失败，或 report_id 与上一轮完全相同且本地队列已处理过，则停止并汇报原因。
 
-只读取 https://leader.okbbc.com/api/index，并且只使用 key_results.primary_output.items 作为今日 A可跟踪龙头研究对象。禁止从 /api/latest 的 themes[].stock_leaders 扩展股票池。
+只使用 https://leader.okbbc.com/api/index 的 key_results.primary_output.items 作为今日 A可跟踪龙头研究对象。禁止从 /api/latest 的 themes[].stock_leaders 扩展股票池。
 
-运行 python scripts/ingest_index.py 更新本地 SQLite 队列。只做入队和状态汇总，不领取 research_queue 任务，不生成个股深研正文，不调用个股战略或财务深研提示词。
+同时读取 https://theme.okbbc.com/api/index，只引用 mainline_ranking、legacy_theme_ranking 和 market 作为主线环境快照。Theme 只提供市场状态、主线强度、生命周期、周期阶段、ETF/板块趋势、拥挤度和风险偏好背景，不扩展股票池，不覆盖 Leader 的个股龙头证据。
+
+运行 python scripts/ingest_index.py 更新本地 SQLite 队列；脚本会同步保存 Leader 快照和 Theme 主线环境快照。只做入队和状态汇总，不领取 research_queue 任务，不生成个股深研正文，不调用个股战略或财务深研提示词。
 
 随后运行 python scripts/update_stock_prices.py --all-system 刷新系统内相关股票的近期 K 线缓存，覆盖最新可跟踪龙头、历史可跟踪龙头、研究队列和已有研究记录。K 线只用于个股页“合理估值区间历史”的价格参照层，不参与估值计算，不改变研究结论。
 
-完成后验证 http://127.0.0.1:8016/api/index 和 http://127.0.0.1:8016/api/latest，汇报 report_id、basis_date、入库股票数量、股票代码和名称，以及生成或保持的 strategic / financial 队列数量。不要输出 .env 内容，不要提交 .env、data/local/*.sqlite、data/raw/*.json。
+完成后验证 http://127.0.0.1:8016/api/index 和 http://127.0.0.1:8016/api/latest，汇报 leader report_id、theme report_id、basis_date、入库股票数量、股票代码和名称，以及生成或保持的 strategic / financial 队列数量。不要输出 .env 内容，不要提交 .env、data/local/*.sqlite、data/raw/*.json。
 ```
 
 ## 个股深研队列消化自动化
@@ -52,7 +54,7 @@
 - strategic 任务只做战略和竞争研究，不写估值区间。
 - financial 任务必须依赖已有 strategic 底稿，可以多次刷新财务输入和确定性估值报告。
 - strategic 底稿未完成时，不提前领取对应 financial 任务。
-- 主线、ETF、行业热度和龙头确认只引用 MyInvestLeader `/api/index` 已入库的上游信号，不在本项目重新研究主线强弱。
+- 龙头确认只引用 MyInvestLeader `/api/index` 已入库的个股信号；主线强度、生命周期、周期阶段、ETF/板块趋势、拥挤度和风险偏好只引用 MyInvestTheme `/api/index` 已入库的主线环境。
 - financial 的 `高估暂缓` 只代表财务安全边际不足，最终页面用上游主线信号和财务安全边际矩阵解释参与类型。
 - `run_id` 由 `stock_code + task_type + research_date + schema_version` 计算，数据库唯一，防止重复研究。
 - financial 估值区间和 signal 必须由 `core/valuation` 的确定性估值引擎生成；LLM 只负责构建 assembly_input 和解释，不负责计算估值数值。
@@ -100,6 +102,8 @@
 入口信息：
 - 数据入口：https://leader.okbbc.com/api/index
 - 入口路径：key_results.primary_output.items
+- 主线环境入口：https://theme.okbbc.com/api/index
+- 主线环境路径：mainline_ranking / legacy_theme_ranking / market
 - report_id：{report_id}
 - basis_date：{basis_date}
 - 主题：{theme}
@@ -107,8 +111,11 @@
 硬约束：
 - 只研究这一只股票，禁止同时研究其他 A可跟踪龙头。
 - 先读取 /api/index，只使用 key_results.primary_output.items 中匹配 {code} 的记录作为入口。
+- 再读取 Theme /api/index，只使用 mainline_ranking、legacy_theme_ranking 和 market 中与“{theme}”匹配的主线环境字段。
 - 可使用 stock_deep_research.stocks 中匹配 {code} 的记录作为已有基础材料。
 - 本任务只做战略、行业、竞争和长期潜力研究，不给最终估值区间。
+- 龙头确认只引用 MyInvestLeader 入库信号；主线强度、生命周期、周期阶段、ETF/板块趋势、拥挤度和风险偏好只引用 MyInvestTheme 入库信号。
+- 不重新生成主线结论，不用网络资料覆盖 Theme 的主线判断；只解释这些主线环境对该股票战略研究的含义。
 - 网络资料可作补充证据，但要记录来源和日期。
 - 不输出交易指令、不输出现金金额、不输出股数。
 
@@ -139,6 +146,8 @@ JSON 必须符合 `core/schema/stock_report.py` 的 `StockResearchReport`：`tas
 入口信息：
 - 数据入口：https://leader.okbbc.com/api/index
 - 入口路径：key_results.primary_output.items
+- 主线环境入口：https://theme.okbbc.com/api/index
+- 主线环境路径：mainline_ranking / legacy_theme_ranking / market
 - report_id：{report_id}
 - basis_date：{basis_date}
 - 主题：{theme}
@@ -157,7 +166,8 @@ JSON 必须符合 `core/schema/stock_report.py` 的 `StockResearchReport`：`tas
 - 估值区间和 valuation signal 必须来自 `core/valuation` 的 deterministic engine，不允许由 LLM 凭空估算。
 - 最终 StockResearchReport 必须来自 `core/report.build_stock_report(...)`，由 assembler 生成 report_version、report_hash、valuation、peer_comparison、risk 和 conclusion。
 - 报告生成必须记录 audit trace：feature、valuation、signal、report 四个 stage 均要有 input_hash/output_hash。
-- 不重新判断主线、ETF 或行业热度；只引用 MyInvestLeader 已入库的上游信号，并说明财务安全边际与主线跟踪价值的区别。
+- 龙头确认只引用 MyInvestLeader 入库信号；主线强度、生命周期、周期阶段、ETF/板块趋势、拥挤度和风险偏好只引用 MyInvestTheme 入库信号，并说明财务安全边际与主线跟踪价值的区别。
+- 不重新判断主线强弱，不用网络资料覆盖 Theme 的主线环境；财务结论必须区分“主线跟踪价值”和“财务安全边际”。
 - 不输出交易指令、不输出现金金额、不输出股数。
 
 必须构建 assembly_input：

@@ -17,14 +17,19 @@ key_results.primary_output.items
 ```
 
 每个 item 表示一只当前 `A可跟踪龙头`，包含代码、名称、主题、深研评分、候选龙头证据、行情估值快照、评分和页面链接。
-`upstream_signal` 是来自 MyInvestLeader 的主线/龙头信号快照，本项目只做字段解释，不重复研究主线。
+`upstream_signal` 是 MyInvestTheme 主线环境与 MyInvestLeader 个股龙头信号的组合快照，本项目只做字段解释，不重复研究主线。
 
 关键字段：
 
 - `schema_version`: `myinveststock.index.v1`
-- `source.upstream_endpoint`: 上游固定为 `https://leader.okbbc.com/api/index`
+- `source.leader_endpoint`: 个股候选入口固定为 `https://leader.okbbc.com/api/index`
+- `source.leader_result_path`: 股票池固定路径 `key_results.primary_output.items`
+- `source.theme_endpoint`: 主线环境入口固定为 `https://theme.okbbc.com/api/index`
+- `source.theme_context_paths`: 主线环境引用路径 `mainline_ranking / legacy_theme_ranking / market`
+- `source.source_policy`: Leader 决定股票池和龙头证据，Theme 提供主线环境，本项目不重新研究主线
 - `key_results.primary_output.items`: 当前主结果股票列表
-- `key_results.primary_output.items[].upstream_signal`: 上游主线信号快照，包含主题、主题绑定、龙头深研、证据质量、交易结构和风险提示
+- `key_results.primary_output.items[].theme_context`: 与该股票主题匹配的 Theme 主线环境快照，可能为空
+- `key_results.primary_output.items[].upstream_signal`: 上游信号快照，包含主题、主线强度、生命周期、周期阶段、ETF/板块趋势、拥挤度、风险偏好、龙头深研、证据质量、交易结构和风险提示
 - `key_results.primary_output.items[].links.research_gateway`: 主动研究入口 `/research?stock={code}`
 - `links.latest`: 研究成果接口 `/api/latest`
 
@@ -41,7 +46,7 @@ key_results.primary_output.items
 - `stocks[].research.strategic`: 最新战略深研底稿
 - `stocks[].research.financial`: 最新财务估值深研
 - `stocks[].research.valuation_history`: 历次估值区间
-- `stocks[].decision_matrix`: `MyInvestLeader upstream signal + MyInvestStock financial safety margin` 的矩阵结论
+- `stocks[].decision_matrix`: `MyInvestTheme mainline environment + MyInvestLeader stock signal + MyInvestStock financial safety margin` 的矩阵结论
 
 ## `/research?stock={code}`
 
@@ -71,7 +76,7 @@ key_results.primary_output.items
 
 - `leader`: 当前或历史最近一次可跟踪龙头记录，没有则为 `null`
 - `leader_summary`: 与 `/api/index` item 同形态的摘要，没有则为 `null`
-- `upstream_signal`: MyInvestLeader 上游主线信号快照
+- `upstream_signal`: MyInvestTheme 主线环境与 MyInvestLeader 个股信号组合快照
 - `decision_matrix`: 上游主线信号与本项目财务安全边际的矩阵结论
 - `research_runs`: 研究历史
 - `queue`: 该股票的队列状态

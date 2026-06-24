@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import closing
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -29,6 +30,7 @@ from myinveststock.leader_index import (
     primary_items,
     report_meta,
 )
+from myinveststock.theme_index import enrich_leader_item, market_context_summary, theme_context_for, theme_report_meta
 from myinveststock.web import (
     FOOTER_SCRIPT_URL,
     STATIC_ASSET_VERSION,
@@ -154,6 +156,113 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(signal["bucket"], "strong")
         self.assertEqual(signal["leader_claim"], "国产AI芯片龙头")
         self.assertEqual(summary["upstream_signal"]["theme_binding"], 91.0)
+
+    def test_theme_context_matches_mainline_and_market_rows(self) -> None:
+        payload = {
+            "latest_report": {
+                "report_id": "mainline_review_2026-06-23_173855",
+                "basis_date": "2026-06-23",
+                "generated_at": "2026-06-23 17:38:55 CST",
+                "data_quality_status": "degraded",
+                "contract_validation_status": "pass",
+            },
+            "mainline_ranking": [
+                {
+                    "theme_id": "hard_tech_semiconductor",
+                    "theme_name": "硬科技电子/半导体",
+                    "mainline_score_v6": 0.9642,
+                    "lifecycle_state": "accelerating",
+                    "lifecycle_state_label": "升温加速",
+                    "cycle_stage": "launch_confirmation",
+                    "cycle_stage_label": "启动确认期",
+                    "cycle_market_score": 53.76,
+                    "cycle_evidence_score": 60.16,
+                    "cycle_stage_advice": "政策和市场开始同向",
+                }
+            ],
+            "legacy_theme_ranking": [
+                {
+                    "theme": "硬科技电子/半导体",
+                    "market_score": 53.7592,
+                    "evidence_score": 60.1583,
+                    "policy_score": 96.42,
+                    "etf_score": 97.4025,
+                    "ths_score": 83.19,
+                    "limit_count": 4,
+                    "top_etf": "588170.SH 半导体ETF",
+                }
+            ],
+            "market": {
+                "breadth": {"up_ratio": 50.1, "r5_positive_ratio": 39.6, "r20_positive_ratio": 20.1},
+                "broad_indexes": [{"code": "000688.SH", "name": "科创50", "r5": 9.6, "r20": 1.0}],
+            },
+        }
+        meta = theme_report_meta(payload)
+        context = theme_context_for(["硬科技电子/半导体"], payload)
+        market = market_context_summary(payload)
+        self.assertEqual(meta["report_id"], "mainline_review_2026-06-23_173855")
+        self.assertIsNotNone(context)
+        self.assertEqual(context["cycle_stage_label"], "启动确认期")
+        self.assertEqual(context["bucket"], "strong")
+        self.assertEqual(context["etf_score"], 97.4025)
+        self.assertEqual(context["crowding_signal"], "热度拥挤代理偏高")
+        self.assertEqual(market["risk_appetite"], "结构性中性")
+
+    def test_enriched_leader_item_feeds_theme_context_into_upstream_signal(self) -> None:
+        theme_payload = {
+            "latest_report": {"report_id": "mainline_review_2026-06-23_173855", "basis_date": "2026-06-23"},
+            "mainline_ranking": [
+                {
+                    "theme_name": "AI算力/通信",
+                    "mainline_score_v6": 1.7533,
+                    "lifecycle_state_label": "升温加速",
+                    "cycle_stage": "policy_incubation",
+                    "cycle_stage_label": "政策孕育期",
+                    "cycle_market_score": 27.05,
+                }
+            ],
+            "legacy_theme_ranking": [{"theme": "AI算力/通信", "etf_score": 78.98, "market_score": 27.05}],
+            "market": {"breadth": {"up_ratio": 50.1}, "broad_indexes": []},
+        }
+        item = {
+            "code": "688256.SH",
+            "name": "寒武纪",
+            "theme": "AI算力/通信",
+            "themes": ["AI算力/通信"],
+            "deep_rating": "A",
+            "deep_label": "可跟踪龙头",
+            "deep_score": 73.1,
+            "candidate_leader_claim": "国产AI芯片龙头",
+            "scores": {"theme_binding": 91.0, "evidence_quality": 89.0},
+            "market": {},
+        }
+        enriched = enrich_leader_item(item, theme_payload)
+        row = {
+            "code": item["code"],
+            "name": item["name"],
+            "theme": item["theme"],
+            "themes_json": '["AI算力/通信"]',
+            "deep_rating": "A",
+            "deep_label": "可跟踪龙头",
+            "deep_score": 73.1,
+            "shadow_observation_eligible": 1,
+            "candidate_leader_tier": "证据确认龙头",
+            "candidate_leader_claim": "国产AI芯片龙头",
+            "candidate_evidence_score": 89.0,
+            "candidate_evidence_count": 5,
+            "candidate_hard_evidence_count": 4,
+            "market_json": "{}",
+            "scores_json": '{"theme_binding": 91.0, "evidence_quality": 89.0}',
+            "risk_flags_json": "[]",
+            "data_gaps_json": "[]",
+            "raw_json": json.dumps(enriched, ensure_ascii=False),
+            "xueqiu_url": "https://xueqiu.com/S/SH688256",
+        }
+        signal = upstream_signal_summary(row)
+        self.assertEqual(signal["source"], "MyInvestLeader /api/index + MyInvestTheme /api/index")
+        self.assertEqual(signal["bucket"], "watch")
+        self.assertEqual(signal["cycle_stage_label"], "政策孕育期")
+        self.assertEqual(signal["risk_appetite"], "结构性中性")
 
     def test_decision_matrix_separates_mainline_from_financial_safety(self) -> None:
         upstream = {

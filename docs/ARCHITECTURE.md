@@ -18,10 +18,11 @@
 ```mermaid
 flowchart LR
   A["leader.okbbc.com /api/index"] --> B["ingest_index.py"]
+  T["theme.okbbc.com /api/index"] --> B
   B --> C["SQLite: leader_reports"]
   B --> D["SQLite: trackable_leaders"]
   B --> E["SQLite: research_queue"]
-  D --> U["upstream_signal: MyInvestLeader 主线/龙头快照"]
+  D --> U["upstream_signal: Leader 个股信号 + Theme 主线环境"]
   E --> F["generate_single_stock_prompt.py"]
   F --> G1["Codex 个股战略深研"]
   F --> G2["Codex 个股财务估值深研"]
@@ -35,6 +36,7 @@ flowchart LR
 ## 分层
 
 - `myinveststock/leader_index.py`：读取 `/api/index`，只解析 `key_results.primary_output.items`。
+- `myinveststock/theme_index.py`：读取 Theme `/api/index`，从 `mainline_ranking`、`legacy_theme_ranking` 和 `market` 摘要主线环境。
 - `myinveststock/db.py`：SQLite schema 和读写函数。
 - `myinveststock/web.py`：只读 Web 页面和 JSON API。
 - `scripts/ingest_index.py`：每日发现队列。
@@ -43,7 +45,13 @@ flowchart LR
 
 ## 上游主线信号边界
 
-MyInvestLeader 负责主线、ETF、行业热度和龙头确认。MyInvestStock 不重新研究主线强弱，只把 `/api/index` 中已经入库的主题、龙头证据、主题绑定、交易结构和风险提示整理为 `upstream_signal`。
+MyInvestLeader 负责个股候选和龙头证据，MyInvestTheme 负责主线强度、生命周期、周期阶段、ETF/板块趋势、拥挤和风险偏好。MyInvestStock 不重新研究主线强弱，只把 Leader 的个股入口信号与 Theme 的主线环境快照整理为 `upstream_signal`。
+
+边界：
+
+- 股票池只来自 `leader.okbbc.com/api/index -> key_results.primary_output.items`。
+- 主线环境只来自 `theme.okbbc.com/api/index -> mainline_ranking / legacy_theme_ranking / market`。
+- 手工 `/research?stock={code}` 入队的股票不要求出现在 Leader 股票池；如果 Theme 无法匹配主题，记录为数据缺口，不强行绑定。
 
 MyInvestStock 的确定性估值只回答“财务安全边际是否足够”。页面和 `/api/latest` 使用 `decision_matrix` 组合两类信号：
 

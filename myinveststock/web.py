@@ -11,7 +11,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from .config import DB_PATH, DEFAULT_HOST, DEFAULT_PORT, FOOTER_SCRIPT_URL, ROOT, STATIC_ASSET_VERSION
+from .config import (
+    DB_PATH,
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    FOOTER_SCRIPT_URL,
+    LEADER_INDEX_URL,
+    ROOT,
+    STATIC_ASSET_VERSION,
+    THEME_INDEX_URL,
+)
 from .db import (
     connect,
     get_known_leader,
@@ -27,7 +36,6 @@ from .db import (
     rows_to_dicts,
     valuation_runs,
 )
-from .config import LEADER_INDEX_URL
 from .leader_index import enqueue_requested_stock
 
 STOCK_CODE_RE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
@@ -51,6 +59,8 @@ def load_json(value: str | None, fallback: object) -> object:
 def leader_to_summary(row: object) -> dict[str, object]:
     market = load_json(row["market_json"], {})
     scores = load_json(row["scores_json"], {})
+    raw = load_json(_row_value(row, "raw_json"), {})
+    theme_context = raw.get("theme_context") if isinstance(raw, dict) else None
     upstream_signal = upstream_signal_summary(row)
     return {
         "code": row["code"],
@@ -70,6 +80,7 @@ def leader_to_summary(row: object) -> dict[str, object]:
         },
         "market": market,
         "scores": scores,
+        "theme_context": theme_context if isinstance(theme_context, dict) else None,
         "upstream_signal": upstream_signal,
         "risk_flags": load_json(row["risk_flags_json"], []),
         "data_gaps": load_json(row["data_gaps_json"], []),
@@ -210,16 +221,20 @@ def _bucket_label(bucket: str, *, kind: str) -> str:
 def upstream_signal_summary(row: object | None) -> dict[str, object]:
     if row is None:
         return {
-            "source": "MyInvestLeader /api/index",
+            "source": "MyInvestLeader /api/index + MyInvestTheme /api/index",
             "theme": None,
             "bucket": "unknown",
             "label": _bucket_label("unknown", kind="upstream"),
-            "explanation": "未找到 MyInvestLeader 入库信号。",
+            "explanation": "未找到 MyInvestLeader 个股入口或 MyInvestTheme 主线环境快照。",
         }
     scores_value = load_json(row["scores_json"], {})
     market_value = load_json(row["market_json"], {})
     risk_flags_value = load_json(row["risk_flags_json"], [])
     themes_value = load_json(row["themes_json"], [])
+    raw_value = load_json(_row_value(row, "raw_json"), {})
+    theme_context = raw_value.get("theme_context") if isinstance(raw_value, dict) else None
+    if not isinstance(theme_context, dict):
+        theme_context = {}
     scores = scores_value if isinstance(scores_value, dict) else {}
     market = market_value if isinstance(market_value, dict) else {}
     risk_flags = risk_flags_value if isinstance(risk_flags_value, list) else []
@@ -229,23 +244,63 @@ def upstream_signal_summary(row: object | None) -> dict[str, object]:
     evidence_quality = _num(scores.get("evidence_quality") or row["candidate_evidence_score"])
     trading_structure = _num(scores.get("trading_structure"))
 
-    anchor_score = theme_binding if theme_binding is not None else leader_score
-    bucket = _signal_bucket(anchor_score, strong=80.0, weak=60.0)
-    if bucket == "strong" and leader_score is not None and leader_score < 65.0:
-        bucket = "watch"
+    theme_bucket = str(theme_context.get("bucket") or "")
+    if theme_bucket in {"strong", "watch", "weak"}:
+        bucket = theme_bucket
+    else:
+        anchor_score = theme_binding if theme_binding is not None else leader_score
+        bucket = _signal_bucket(anchor_score, strong=80.0, weak=60.0)
+        if bucket == "strong" and leader_score is not None and leader_score < 65.0:
+            bucket = "watch"
     label = _bucket_label(bucket, kind="upstream")
     parts = [
+        f"主线强度 {fmt_num(theme_context.get('mainline_score_v6'))}",
+        f"生命周期 {theme_context.get('lifecycle_state_label') or '待入库'}",
+        f"周期阶段 {theme_context.get('cycle_stage_label') or '待入库'}",
+        f"市场确认 {fmt_num(theme_context.get('cycle_market_score') or theme_context.get('market_score'))}",
+        f"ETF/板块 {fmt_num(theme_context.get('etf_score'))}",
+        f"拥挤度 {theme_context.get('crowding_signal') or '待入库'}",
+        f"风险偏好 {theme_context.get('risk_appetite') or '待入库'}",
         f"主题绑定 {fmt_num(theme_binding)}",
         f"龙头深研 {fmt_num(leader_score)}",
         f"证据质量 {fmt_num(evidence_quality)}",
         f"交易结构 {fmt_num(trading_structure)}",
     ]
     return {
-        "source": "MyInvestLeader /api/index",
+        "source": (
+            "MyInvestLeader /api/index + MyInvestTheme /api/index"
+            if theme_context
+            else "MyInvestLeader /api/index"
+        ),
         "theme": row["theme"],
         "themes": themes,
         "bucket": bucket,
         "label": label,
+        "theme_context": theme_context or None,
+        "mainline_score_v6": theme_context.get("mainline_score_v6"),
+        "lifecycle_state": theme_context.get("lifecycle_state"),
+        "lifecycle_state_label": theme_context.get("lifecycle_state_label"),
+        "cycle_stage": theme_context.get("cycle_stage"),
+        "cycle_stage_label": theme_context.get("cycle_stage_label"),
+        "cycle_stage_advice": theme_context.get("cycle_stage_advice"),
+        "cycle_market_score": theme_context.get("cycle_market_score"),
+        "cycle_evidence_score": theme_context.get("cycle_evidence_score"),
+        "market_score": theme_context.get("market_score"),
+        "policy_score": theme_context.get("policy_score"),
+        "etf_score": theme_context.get("etf_score"),
+        "crowding_signal": theme_context.get("crowding_signal"),
+        "market_state": theme_context.get("market_state"),
+        "risk_appetite": theme_context.get("risk_appetite"),
+        "theme_quality": {
+            "data_quality_status": theme_context.get("data_quality_status"),
+            "contract_validation_status": theme_context.get("contract_validation_status"),
+            "policy_provenance_status": theme_context.get("policy_provenance_status"),
+            "snapshot_status": theme_context.get("snapshot_status"),
+            "report_id": theme_context.get("report_id"),
+            "basis_date": theme_context.get("basis_date"),
+        }
+        if theme_context
+        else None,
         "theme_binding": theme_binding,
         "leader_score": leader_score,
         "evidence_quality": evidence_quality,
@@ -345,7 +400,7 @@ def decision_matrix_summary(
         "financial_label": financial_signal.get("label"),
         "posture": posture,
         "conclusion": conclusion,
-        "rule": "MyInvestLeader upstream signal + MyInvestStock financial safety margin matrix",
+        "rule": "MyInvestTheme mainline environment + MyInvestLeader stock signal + MyInvestStock financial safety margin matrix",
     }
 
 
@@ -1079,10 +1134,17 @@ def render_signal_matrix(
         <div class="signal-matrix">
           <div class="signal-panel signal-panel-upstream">
             <h3>上游主线信号</h3>
-            <p class="muted">来自 MyInvestLeader，不在本项目重复研究主线。</p>
+            <p class="muted">主线环境来自 MyInvestTheme，个股龙头入口来自 MyInvestLeader，本项目不重复研究主线。</p>
             <div class="signal-grid">
               {signal_item("所属主题", upstream_signal.get("theme"))}
               {signal_item("主线状态", upstream_signal.get("label"), upstream_signal.get("rating"))}
+              {signal_item("生命周期", upstream_signal.get("lifecycle_state_label"))}
+              {signal_item("周期阶段", upstream_signal.get("cycle_stage_label"), upstream_signal.get("cycle_stage_advice"))}
+              {signal_item("主线强度", fmt_num(upstream_signal.get("mainline_score_v6")))}
+              {signal_item("市场确认", fmt_num(upstream_signal.get("cycle_market_score") or upstream_signal.get("market_score")))}
+              {signal_item("ETF/板块", fmt_num(upstream_signal.get("etf_score")))}
+              {signal_item("拥挤度", upstream_signal.get("crowding_signal"))}
+              {signal_item("风险偏好", upstream_signal.get("risk_appetite"), upstream_signal.get("market_state"))}
               {signal_item("主题绑定", fmt_num(upstream_signal.get("theme_binding")))}
               {signal_item("龙头深研", fmt_num(upstream_signal.get("leader_score")))}
               {signal_item("证据质量", fmt_num(upstream_signal.get("evidence_quality")))}
@@ -1330,9 +1392,11 @@ def api_index() -> bytes:
             "primary_result_path": "key_results.primary_output.items",
         },
         "source": {
-            "upstream_endpoint": LEADER_INDEX_URL,
-            "upstream_result_path": "key_results.primary_output.items",
-            "source_policy": "only A trackable leaders; do not expand from upstream /api/latest themes[].stock_leaders",
+            "leader_endpoint": LEADER_INDEX_URL,
+            "leader_result_path": "key_results.primary_output.items",
+            "theme_endpoint": THEME_INDEX_URL,
+            "theme_context_paths": ["mainline_ranking", "legacy_theme_ranking", "market"],
+            "source_policy": "Leader only supplies A trackable stock candidates; Theme supplies mainline environment and market context",
         },
         "report": dict(report) if report else None,
         "key_results": {
@@ -1394,6 +1458,11 @@ def api_latest() -> bytes:
     payload = {
         "schema_version": "myinveststock.research.v1",
         "report": dict(report) if report else None,
+        "source": {
+            "leader_endpoint": LEADER_INDEX_URL,
+            "theme_endpoint": THEME_INDEX_URL,
+            "theme_context_paths": ["mainline_ranking", "legacy_theme_ranking", "market"],
+        },
         "summary": {
             "stock_count": len(stocks),
             "research_run_count": research_run_count,

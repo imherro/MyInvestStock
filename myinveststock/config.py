@@ -7,8 +7,9 @@ RAW_DATA_DIR = DATA_DIR / "raw"
 DB_PATH = LOCAL_DATA_DIR / "myinveststock.sqlite"
 
 LEADER_INDEX_URL = "https://leader.okbbc.com/api/index"
+THEME_INDEX_URL = "https://theme.okbbc.com/api/index"
 FOOTER_SCRIPT_URL = "https://invest.okbbc.com/footer.js"
-STATIC_ASSET_VERSION = "20260624-signal-matrix"
+STATIC_ASSET_VERSION = "20260624-theme-context"
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8016
