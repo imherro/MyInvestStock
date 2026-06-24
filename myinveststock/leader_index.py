@@ -23,7 +23,7 @@ STOCK_CODE_RE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
 STOCK_REPORT_SCHEMA_INSTRUCTION = """结构化输出要求：
 - 最终只输出一个 JSON object，不要输出 Markdown 包裹。
 - JSON 必须符合 core/schema/stock_report.py 中 StockResearchReport。
-- 顶层字段固定为：schema_version, run_id, stock_code, stock_name, source_report_id, task_type, research_date, status, title, summary, industry_position, competition_landscape, upstream_downstream, annual_growth, multi_bagger_potential, heavy_position_view, fundamentals, valuation, peer_comparison, risk, conclusion, evidence, assumptions。
+- 顶层字段固定为：schema_version, report_version, report_hash, run_id, stock_code, stock_name, source_report_id, task_type, research_date, status, title, summary, industry_position, competition_landscape, upstream_downstream, annual_growth, multi_bagger_potential, heavy_position_view, fundamentals, valuation, peer_comparison, risk, conclusion, evidence, assumptions。
 - 禁止输出 schema 以外的额外字段；禁止把未定义内容塞进自由 dict。
 - stock_code 使用唯一研究对象代码，stock_name 使用唯一研究对象名称，source_report_id 使用入口 report_id。
 - research_date 必须使用入口 basis_date。
@@ -178,6 +178,7 @@ def build_financial_prompt(item: dict[str, Any], report: dict[str, Any]) -> str:
 - valuation.intrinsic_value_low / intrinsic_value_mid / intrinsic_value_high 必须全部为数字，且 low <= mid <= high。
 - valuation.unit 默认使用 CNY/share。
 - valuation 区间和 valuation signal 必须来自 core/valuation 的 deterministic engine；LLM 只负责解释结论，不允许凭空生成估值数值。
+- 最终 StockResearchReport 必须来自 core/report.build_stock_report(...) 或 scripts/build_research_report.py；不要手写 dict 拼装 valuation、peer_comparison、risk、conclusion。
 
 {STOCK_REPORT_SCHEMA_INSTRUCTION}
 

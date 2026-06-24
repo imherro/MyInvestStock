@@ -9,6 +9,8 @@
 统一研究 JSON 的顶层字段：
 
 - `schema_version`：固定为 `stock_research_report.v1`。
+- `report_version`：确定性报告组装器版本，新报告由 `core/report` 填充。
+- `report_hash`：确定性回放 hash，新报告由 `core/report` 填充。
 - `run_id`：本次研究运行 ID；缺省时由 schema 根据 `stock_code + task_type + research_date + schema_version` 生成。
 - `stock_code`：股票代码，例如 `600519.SH`。
 - `stock_name`：股票名称。
@@ -29,6 +31,7 @@
 强约束：
 
 - schema 禁止额外字段。
+- `report_hash` 如果提供，必须是 64 位小写 sha256 hex。
 - `heavy_position_view` 必须等于 `conclusion.grade`。
 - 如果显式提供 `run_id`，必须等于系统计算值，否则拒绝入库。
 - `strategic` 不允许写入估值区间。
@@ -103,6 +106,23 @@ BLOCKED -> FAILED
 - `signal.py`：估值、增长、质量和风险调整分数。
 
 LLM 可以解释这些 deterministic output，但不能替代公式计算。
+
+## 确定性报告组装
+
+财务报告最终结构由 `core/report.build_stock_report(input_data)` 生成：
+
+- 输入：`financial_rows`、`valuation_inputs`、`peers`、`risk_signals` 和基础股票元数据。
+- 输出：通过 Pydantic 校验的 `StockResearchReport`。
+- `core/report/conclusion.py` 用固定规则从 valuation signal 生成 `heavy_position_view` 和 `conclusion`。
+- `report_hash` 基于 `stock_code`、feature inputs、valuation outputs、peer outputs 计算，same input 必须得到 same hash。
+
+命令行入口：
+
+```powershell
+python scripts/build_research_report.py path\to\assembly_input.json
+```
+
+财务深研可以用 LLM 搜集、解释证据，但最终 JSON 的估值、同业、风险调整分数和结论等级必须由 assembler 生成。
 
 ## 研究频率
 

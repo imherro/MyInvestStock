@@ -10,6 +10,7 @@ from core.task.state import compute_task_run_id
 
 STOCK_CODE_RE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
 TaskType = Literal["strategic", "financial"]
 RunStatus = Literal["complete", "draft", "blocked"]
@@ -95,6 +96,8 @@ class Conclusion(StrictSchemaModel):
 
 class StockResearchReport(StrictSchemaModel):
     schema_version: Literal["stock_research_report.v1"] = "stock_research_report.v1"
+    report_version: StrictStr | None = None
+    report_hash: StrictStr | None = None
     run_id: StrictStr | None = None
     stock_code: StrictStr
     stock_name: StrictStr
@@ -124,6 +127,8 @@ class StockResearchReport(StrictSchemaModel):
             raise ValueError("stock_code must match 000000.SH/SZ/BJ")
         if not DATE_RE.match(self.research_date):
             raise ValueError("research_date must use YYYY-MM-DD")
+        if self.report_hash is not None and not HASH_RE.match(self.report_hash):
+            raise ValueError("report_hash must be a 64-character lowercase sha256 hex digest")
         if self.heavy_position_view != self.conclusion.grade:
             raise ValueError("heavy_position_view must equal conclusion.grade")
 
