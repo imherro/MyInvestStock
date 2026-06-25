@@ -110,7 +110,7 @@ MyInvestTheme 是主线研究事实源，MyInvestLeader 是个股候选和龙头
 个股页的“合理估值区间历史”优先显示近期 K 线叠加估值区间图。
 
 - K 线数据来自本地 SQLite `stock_daily_prices`，通过 `scripts/update_stock_prices.py` 从 Tushare `pro_bar` 刷新。
-- 页面只读本地缓存，不在用户访问页面时联网，也不读取 `.env`。
+- 个股页图表展示只读本地缓存，不在用户访问页面时联网，也不读取 `.env`。
 - K 线默认使用前复权 `qfq` 口径，作为价格参照层，不参与估值计算。
 - 合理估值区间仍由确定性估值引擎和报告 assembler 生成。
 - 如果某只股票还没有 K 线缓存，页面自动降级为纯估值历史图。
@@ -212,6 +212,7 @@ https://stock.okbbc.com/research?stock=603259.SH
 
 - 如果本地已经有该股票的个股页、研究记录或队列任务，直接跳转到 `/stocks/{code}`。
 - 如果本地还没有该股票，系统创建当天的主动请求队列批次，并跳转到 `/stocks/{code}?queued=1`。
+- `name` 参数可选；未传名称时先查本地历史记录，再用 Tushare `stock_basic` 补全股票名称，最后才用代码兜底。
 - 主动请求股票不要求出现在 `/api/index` 的 `key_results.primary_output.items` 中。
 - 主动请求入队来源显示为 `其他请求`；上游龙头自动入队来源显示为 `可跟踪龙头`。
 - 该入口不直接调用 Codex 深研，不绕过“一次只研究一只股票”的队列规则。

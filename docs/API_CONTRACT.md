@@ -56,6 +56,7 @@ key_results.primary_output.items
 
 - 如果本地已有该股票页面、研究记录或队列任务，返回 `303` 跳转到 `/stocks/{code}`。
 - 如果本地没有该股票，创建当天主动请求队列批次，来源标记为 `manual_request` / `其他请求`，再返回 `303` 跳转到 `/stocks/{code}?queued=1`。
+- `name` 查询参数可选；未提供名称时，系统按“本地历史记录 -> Tushare `stock_basic` -> 股票代码兜底”的顺序补全队列名称。
 - 不要求该股票出现在 `/api/index` 的 `key_results.primary_output.items`。
 - 不直接执行深研，不绕过队列领取和单股单任务规则。
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import urllib.request
 from contextlib import closing
@@ -25,6 +26,7 @@ from .db import (
 from .theme_index import enrich_leader_item, theme_report_meta
 
 STOCK_CODE_RE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
+TUSHARE_API_URL = "https://api.tushare.pro"
 
 
 STOCK_REPORT_SCHEMA_INSTRUCTION = """StockResearchReport 结构化输出要求：
@@ -133,6 +135,115 @@ def save_raw_payload(payload: dict[str, Any], report_id: str, raw_dir: Path = RA
     path = raw_dir / f"{safe_report_id}.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     return path
+
+
+def _clean_requested_stock_name(name: str | None, code: str) -> str | None:
+    clean = (name or "").strip()
+    if not clean or clean.upper() == code or STOCK_CODE_RE.match(clean.upper()):
+        return None
+    return clean
+
+
+def _load_env_value(key: str) -> str | None:
+    value = os.environ.get(key)
+    if value:
+        return value.strip()
+    env_path = Path(__file__).resolve().parents[1] / ".env"
+    if not env_path.exists():
+        return None
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        clean = line.strip()
+        if not clean or clean.startswith("#") or "=" not in clean:
+            continue
+        env_key, env_value = clean.split("=", 1)
+        if env_key.strip() == key:
+            return env_value.strip().strip('"').strip("'") or None
+    return None
+
+
+def lookup_tushare_stock_name(code: str, *, timeout: int = 10) -> str | None:
+    token = _load_env_value("TUSHARE_TOKEN")
+    if not token:
+        return None
+    payload = {
+        "api_name": "stock_basic",
+        "token": token,
+        "params": {"ts_code": code},
+        "fields": "ts_code,name",
+    }
+    request = urllib.request.Request(
+        TUSHARE_API_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", "User-Agent": "MyInvestStock/0.1"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = json.loads(response.read().decode("utf-8"))
+    except (OSError, json.JSONDecodeError, TimeoutError):
+        return None
+    fields = raw.get("data", {}).get("fields") or []
+    items = raw.get("data", {}).get("items") or []
+    if "name" not in fields or not items:
+        return None
+    name_index = fields.index("name")
+    first = items[0]
+    if not isinstance(first, list) or name_index >= len(first):
+        return None
+    stock_name = str(first[name_index] or "").strip()
+    return stock_name or None
+
+
+def known_stock_name(conn: Any, code: str) -> str | None:
+    row = conn.execute(
+        """
+        WITH candidates AS (
+            SELECT name, 1 AS priority
+            FROM trackable_leaders
+            WHERE code = ?
+
+            UNION ALL
+
+            SELECT name, 2 AS priority
+            FROM stock_research_runs
+            WHERE code = ?
+
+            UNION ALL
+
+            SELECT name, 3 AS priority
+            FROM research_queue
+            WHERE code = ?
+        )
+        SELECT name
+        FROM candidates
+        WHERE COALESCE(name, '') != ''
+          AND UPPER(name) != ?
+        ORDER BY priority ASC
+        LIMIT 1
+        """,
+        (code, code, code, code),
+    ).fetchone()
+    if row is None:
+        return None
+    return str(row["name"]).strip() or None
+
+
+def resolve_requested_stock_name(
+    code: str,
+    *,
+    requested_name: str | None = None,
+    db_path: Path | str | None = None,
+) -> str:
+    stock_code = code.strip().upper()
+    clean_requested = _clean_requested_stock_name(requested_name, stock_code)
+    if clean_requested:
+        return clean_requested
+    db_target = Path(db_path) if db_path is not None else DB_PATH
+    with closing(connect(db_target)) as conn:
+        known = known_stock_name(conn, stock_code)
+    if known:
+        return known
+    return lookup_tushare_stock_name(stock_code) or stock_code
 
 
 def build_stock_research_prompt(
@@ -268,7 +379,9 @@ def enqueue_requested_stock(
     stock_code = code.strip().upper()
     if not STOCK_CODE_RE.match(stock_code):
         raise ValueError(f"invalid stock code: {code}")
-    stock_name = (name or stock_code).strip() or stock_code
+    db_target = Path(db_path) if db_path is not None else DB_PATH
+    init_db(db_target)
+    stock_name = resolve_requested_stock_name(stock_code, requested_name=name, db_path=db_target)
     basis_date = datetime.now().date().isoformat()
     report = {
         "report_id": f"manual_research_request_{basis_date}",
@@ -279,8 +392,6 @@ def enqueue_requested_stock(
     }
     item = {"code": stock_code, "name": stock_name, "theme": "其他请求"}
     now = utc_now()
-    db_target = Path(db_path) if db_path is not None else DB_PATH
-    init_db(db_target)
     queued: list[str] = []
     with closing(connect(db_target)) as conn:
         upsert_report(

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from myinveststock.db import (
     QUEUE_SOURCE_REQUEST,
@@ -366,6 +367,19 @@ class ContractTests(unittest.TestCase):
             self.assertEqual([row["task_type"] for row in rows], [TASK_TYPE_STOCK_RESEARCH])
             self.assertEqual(rows[0]["trigger_reason"], TRIGGER_MANUAL_REQUEST)
             self.assertIsNone(report)
+
+    def test_requested_stock_without_name_resolves_stock_basic_name(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "manual.sqlite"
+            with patch("myinveststock.leader_index.lookup_tushare_stock_name", return_value="平安银行") as lookup:
+                result = enqueue_requested_stock("000001.SZ", db_path=db_path)
+            with closing(connect(db_path)) as conn:
+                rows = list_queue(conn)
+            self.assertEqual(result["name"], "平安银行")
+            self.assertEqual(rows[0]["name"], "平安银行")
+            self.assertIn("MyInvestStock 个股深研 000001.SZ 平安银行", rows[0]["task_keyword"])
+            self.assertIn("唯一研究对象：000001.SZ 平安银行", rows[0]["prompt"])
+            lookup.assert_called_once_with("000001.SZ")
 
     def test_stock_code_links_to_xueqiu_new_window(self) -> None:
         self.assertEqual(xueqiu_url_for_code("603259.SH"), "https://xueqiu.com/S/SH603259")

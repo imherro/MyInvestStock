@@ -1563,7 +1563,7 @@ class MyInvestStockHandler(BaseHTTPRequestHandler):
             exists, known_name = _stock_exists(conn, code)
         queued = False
         if not exists:
-            enqueue_requested_stock(code, name=requested_name or known_name or code)
+            enqueue_requested_stock(code, name=requested_name or known_name)
             queued = True
         location = f"/stocks/{quote(code)}"
         if queued:
