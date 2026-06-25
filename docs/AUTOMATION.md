@@ -35,7 +35,7 @@ MyInvestStock 个股深研 {code} {name}
 
 运行 python scripts/ingest_index.py 更新本地 SQLite 队列。新任务统一为 task_type='stock_research'，trigger_reason='新进入可跟踪龙头'。
 
-随后运行 python scripts/update_stock_prices.py --all-system 刷新系统内相关股票的近期 K 线缓存。
+随后运行 python scripts/update_stock_prices.py --all-system 刷新系统内相关股票从 2024-09-24 起的收盘价缓存。
 
 完成后验证 http://127.0.0.1:8016/api/index 和 http://127.0.0.1:8016/api/latest，汇报 leader report_id、theme report_id、basis_date、入库股票数量、股票代码和名称，以及生成或保持的 stock_research 队列数量。不要输出 .env 内容，不要提交 .env、data/local/*.sqlite、data/raw/*.json。
 ```

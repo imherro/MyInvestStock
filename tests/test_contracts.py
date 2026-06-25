@@ -418,7 +418,7 @@ class ContractTests(unittest.TestCase):
         self.assertIn("06-22", html)
         self.assertIn("06-24", html)
 
-    def test_valuation_chart_uses_kline_overlay_when_prices_exist(self) -> None:
+    def test_valuation_chart_uses_close_price_overlay_when_prices_exist(self) -> None:
         runs = [
             {
                 "research_date": "2026-06-22",
@@ -461,11 +461,14 @@ class ContractTests(unittest.TestCase):
             },
         ]
         html = render_valuation_chart(runs, prices)
-        self.assertIn("K线叠加合理估值区间图", html)
-        self.assertIn("kline-layer", html)
+        self.assertIn("收盘价折线叠加合理估值区间图", html)
+        self.assertIn("close-price-layer", html)
+        self.assertIn("close-price-line", html)
         self.assertIn("valuation-step-band", html)
-        self.assertIn("legend-kline", html)
+        self.assertIn("legend-close", html)
+        self.assertIn("2024-09-24以来收盘价", html)
         self.assertIn("个股深研刷新点", html)
+        self.assertNotIn("kline-layer", html)
 
     def test_single_valuation_chart_uses_whisker_without_band(self) -> None:
         html = render_valuation_chart(

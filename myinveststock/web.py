@@ -5,7 +5,7 @@ import json
 import mimetypes
 import re
 from contextlib import closing
-from datetime import datetime, timedelta
+from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -40,6 +40,7 @@ from .db import (
 from .leader_index import enqueue_requested_stock
 
 STOCK_CODE_RE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
+BULL_MARKET_START_DATE = "2024-09-24"
 
 
 def esc(value: object) -> str:
@@ -789,14 +790,6 @@ def _parsed_date(value: object) -> object | None:
         return None
 
 
-def _valuation_price_start(runs: list[object]) -> str | None:
-    dates = [_parsed_date(_row_value(row, "research_date")) for row in runs]
-    valid_dates = [item for item in dates if item is not None]
-    if not valid_dates:
-        return None
-    return (min(valid_dates) - timedelta(days=45)).isoformat()
-
-
 def _render_plain_valuation_chart(points: list[dict[str, object]]) -> str:
     if not points:
         return render_empty_section("合理估值区间历史")
@@ -911,7 +904,7 @@ def _price_index_on_or_after(price_dates: list[object], date_value: object) -> i
     return max(len(price_dates) - 1, 0)
 
 
-def _render_kline_valuation_chart(
+def _render_close_price_valuation_chart(
     valuation_points: list[dict[str, object]],
     price_points: list[dict[str, object]],
 ) -> str:
@@ -929,12 +922,11 @@ def _render_kline_valuation_chart(
     plot_right = width - right
     plot_bottom = height - bottom
 
-    price_lows = [float(item["low"]) for item in price_points]
-    price_highs = [float(item["high"]) for item in price_points]
+    price_closes = [float(item["close"]) for item in price_points]
     valuation_lows = [float(item["low"]) for item in valuation_points]
     valuation_highs = [float(item["high"]) for item in valuation_points]
-    lower = min(price_lows + valuation_lows)
-    upper = max(price_highs + valuation_highs)
+    lower = min(price_closes + valuation_lows)
+    upper = max(price_closes + valuation_highs)
     span = upper - lower
     pad = max(span * 0.08, max(abs(upper), 1.0) * 0.02, 1.0)
     y_min = lower - pad
@@ -943,7 +935,6 @@ def _render_kline_valuation_chart(
     price_dates = [_parsed_date(item["date"]) for item in price_points]
     price_count = len(price_points)
     spacing = plot_width / (price_count - 1)
-    candle_width = min(max(spacing * 0.58, 2.4), 7.5)
 
     tick_lines = []
     for index in range(5):
@@ -956,33 +947,22 @@ def _render_kline_valuation_chart(
         </g>"""
         )
 
-    candles = []
     label_step = max(1, (price_count + 5) // 6)
     x_labels = []
+    close_line_points = []
     for index, item in enumerate(price_points):
         x = _chart_x(index, price_count, left, plot_width)
-        y_open = _chart_y(float(item["open"]), y_min, y_max, top, plot_height)
         y_close = _chart_y(float(item["close"]), y_min, y_max, top, plot_height)
-        y_high = _chart_y(float(item["high"]), y_min, y_max, top, plot_height)
-        y_low = _chart_y(float(item["low"]), y_min, y_max, top, plot_height)
-        body_top = min(y_open, y_close)
-        body_height = max(abs(y_close - y_open), 1.4)
-        trend_class = "kline-up" if float(item["close"]) >= float(item["open"]) else "kline-down"
-        tooltip = (
-            f"{item['date']} | 开 {fmt_num(item['open'])} | 高 {fmt_num(item['high'])} | "
-            f"低 {fmt_num(item['low'])} | 收 {fmt_num(item['close'])}"
-        )
-        candles.append(
-            f"""<g class="kline-candle {trend_class}">
-          <title>{esc(tooltip)}</title>
-          <line class="kline-wick" x1="{x:.1f}" y1="{y_high:.1f}" x2="{x:.1f}" y2="{y_low:.1f}"></line>
-          <rect class="kline-body" x="{x - candle_width / 2:.1f}" y="{body_top:.1f}" width="{candle_width:.1f}" height="{body_height:.1f}"></rect>
-        </g>"""
-        )
+        close_line_points.append(f"{x:.1f},{y_close:.1f}")
         if index % label_step == 0 or index == price_count - 1:
             x_labels.append(
                 f"""<text class="valuation-date-label" x="{x:.1f}" y="{height - 18:.1f}" text-anchor="middle">{esc(short_date(item['date']))}</text>"""
             )
+    close_line = (
+        f"""<polyline class="close-price-line" points="{' '.join(close_line_points)}">
+          <title>{esc(BULL_MARKET_START_DATE)}以来收盘价折线</title>
+        </polyline>"""
+    )
 
     positioned_valuations = []
     for point in valuation_points:
@@ -1043,14 +1023,14 @@ def _render_kline_valuation_chart(
     return f"""<section class="section-block">
       <h2>合理估值区间历史</h2>
       <div class="valuation-chart">
-        <svg class="valuation-history-svg" viewBox="0 0 {width:.0f} {height:.0f}" role="img" aria-label="K线叠加合理估值区间图">
-          <title>K线叠加合理估值区间图</title>
+        <svg class="valuation-history-svg" viewBox="0 0 {width:.0f} {height:.0f}" role="img" aria-label="收盘价折线叠加合理估值区间图">
+          <title>收盘价折线叠加合理估值区间图</title>
           <line class="valuation-axis-line" x1="{left:.1f}" y1="{top:.1f}" x2="{left:.1f}" y2="{plot_bottom:.1f}"></line>
           <line class="valuation-axis-line" x1="{left:.1f}" y1="{plot_bottom:.1f}" x2="{plot_right:.1f}" y2="{plot_bottom:.1f}"></line>
           <text class="valuation-axis-title" x="{left:.1f}" y="16" text-anchor="start">价格 CNY/share</text>
           <text class="valuation-range-label" x="{plot_right:.1f}" y="16" text-anchor="end">{esc(short_date(first_date))} - {esc(short_date(last_date))}</text>
           {''.join(tick_lines)}
-          <g class="kline-layer">{''.join(candles)}</g>
+          <g class="close-price-layer">{close_line}</g>
           <g class="valuation-overlay-layer">
             {''.join(bands)}
             {''.join(boundary_lines)}
@@ -1060,7 +1040,7 @@ def _render_kline_valuation_chart(
           {''.join(x_labels)}
         </svg>
         <div class="valuation-legend">
-          <span><i class="legend-kline"></i>近期K线</span>
+          <span><i class="legend-close"></i>{esc(BULL_MARKET_START_DATE)}以来收盘价</span>
           <span><i class="legend-band"></i>保守-乐观区间</span>
           <span><i class="legend-line"></i>合理估值中枢</span>
           <span><i class="legend-dot"></i>个股深研刷新点</span>
@@ -1075,7 +1055,7 @@ def render_valuation_chart(runs: list[object], prices: list[object] | None = Non
         return render_empty_section("合理估值区间历史")
     price_points = _daily_price_points(prices or [])
     if price_points:
-        return _render_kline_valuation_chart(points, price_points)
+        return _render_close_price_valuation_chart(points, price_points)
     return _render_plain_valuation_chart(points)
 
 
@@ -1237,8 +1217,7 @@ def render_stock_page(code: str) -> bytes:
         stock_queue = list_queue_for_stock(conn, code)
         trackable_history = list_trackable_history(conn, code)
         chart_runs = valuation_runs(conn, code)
-        price_start = _valuation_price_start(chart_runs)
-        chart_prices = list_daily_prices(conn, code, start_date=price_start, limit=260) if price_start else []
+        chart_prices = list_daily_prices(conn, code, start_date=BULL_MARKET_START_DATE)
         report = latest_report(conn)
     if leader is None and not runs and not stock_queue:
         return render_layout(

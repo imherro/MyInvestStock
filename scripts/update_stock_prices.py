@@ -16,6 +16,8 @@ if hasattr(sys.stdout, "reconfigure"):
 from myinveststock.config import DB_PATH
 from myinveststock.db import connect, init_db, list_latest_leaders, list_price_refresh_subjects, upsert_daily_prices
 
+DEFAULT_PRICE_START_DATE = "2024-09-24"
+
 
 def load_env_token() -> str | None:
     token = os.environ.get("TUSHARE_TOKEN")
@@ -82,7 +84,11 @@ def main() -> int:
         action="store_true",
         help="Refresh every stock already present in leader history, research queue, or research runs.",
     )
-    parser.add_argument("--days", type=int, default=360, help="Calendar-day lookback when --start-date is omitted.")
+    parser.add_argument(
+        "--days",
+        type=int,
+        help="Calendar-day lookback when --start-date is omitted. Defaults to the 2024-09-24 bull-market start.",
+    )
     parser.add_argument("--start-date", help="Inclusive start date, YYYY-MM-DD.")
     parser.add_argument("--end-date", default=datetime.now().date().isoformat(), help="Inclusive end date, YYYY-MM-DD.")
     parser.add_argument("--adj", choices=["qfq", "hfq", "none"], default="qfq", help="Tushare adjustment mode.")
@@ -112,7 +118,7 @@ def main() -> int:
         return 2
 
     ts.set_token(token)
-    start_date = args.start_date or date_days_ago(args.days)
+    start_date = args.start_date or (date_days_ago(args.days) if args.days else DEFAULT_PRICE_START_DATE)
 
     init_db(DB_PATH)
     with connect(DB_PATH) as conn:

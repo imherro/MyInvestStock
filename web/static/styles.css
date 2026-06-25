@@ -467,28 +467,16 @@ tr:last-child td {
   font-size: 12px;
 }
 
-.kline-layer {
-  opacity: 0.72;
+.close-price-layer {
+  opacity: 0.86;
 }
 
-.kline-wick {
-  stroke-width: 1.1;
-}
-
-.kline-body {
-  stroke-width: 1;
-}
-
-.kline-up .kline-wick,
-.kline-up .kline-body {
-  fill: rgba(220, 38, 38, 0.38);
-  stroke: rgba(185, 28, 28, 0.72);
-}
-
-.kline-down .kline-wick,
-.kline-down .kline-body {
-  fill: rgba(22, 163, 74, 0.34);
-  stroke: rgba(21, 128, 61, 0.72);
+.close-price-line {
+  fill: none;
+  stroke: #2563eb;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.2;
 }
 
 .valuation-band {
@@ -550,9 +538,9 @@ tr:last-child td {
   height: 10px;
 }
 
-.legend-kline {
-  background: linear-gradient(90deg, rgba(220, 38, 38, 0.55) 0 45%, transparent 45% 55%, rgba(22, 163, 74, 0.55) 55%);
-  border: 1px solid rgba(100, 116, 139, 0.24);
+.legend-close {
+  height: 0 !important;
+  border-top: 3px solid #2563eb;
 }
 
 .legend-band {

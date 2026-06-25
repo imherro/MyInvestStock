@@ -105,18 +105,18 @@ MyInvestTheme 是主线研究事实源，MyInvestLeader 是个股候选和龙头
 
 估值模型的 `高估暂缓` 保留为原始安全边际标签，但页面最终结论改为矩阵解释。
 
-## K线叠加估值区间
+## 收盘价折线叠加估值区间
 
-个股页的“合理估值区间历史”优先显示近期 K 线叠加估值区间图。
+个股页的“合理估值区间历史”优先显示从 `2024-09-24` 起的收盘价折线叠加估值区间图。
 
-- K 线数据来自本地 SQLite `stock_daily_prices`，通过 `scripts/update_stock_prices.py` 从 Tushare `pro_bar` 刷新。
+- 收盘价数据来自本地 SQLite `stock_daily_prices`，通过 `scripts/update_stock_prices.py` 从 Tushare `pro_bar` 刷新。
 - 个股页图表展示只读本地缓存，不在用户访问页面时联网，也不读取 `.env`。
-- K 线默认使用前复权 `qfq` 口径，作为价格参照层，不参与估值计算。
+- 价格默认使用前复权 `qfq` 口径，作为价格参照层，不参与估值计算。
 - 合理估值区间仍由确定性估值引擎和报告 assembler 生成。
-- 如果某只股票还没有 K 线缓存，页面自动降级为纯估值历史图。
+- 如果某只股票还没有收盘价缓存，页面自动降级为纯估值历史图。
 - 默认刷新范围覆盖最新可跟踪龙头、历史可跟踪龙头、研究队列和已有研究记录中的股票。
 
-刷新系统内相关股票的近期 K 线：
+刷新系统内相关股票从 `2024-09-24` 起的价格缓存：
 
 ```powershell
 python scripts/update_stock_prices.py --all-system
@@ -267,7 +267,7 @@ python -m pip install -r requirements.txt
 python scripts/ingest_index.py
 ```
 
-刷新 K 线缓存：
+刷新 `2024-09-24` 起的价格缓存：
 
 ```powershell
 python scripts/update_stock_prices.py --all-system
