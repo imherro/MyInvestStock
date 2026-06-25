@@ -494,6 +494,43 @@ tr:last-child td {
   stroke-width: 3px;
 }
 
+.valuation-reference-line {
+  stroke-dasharray: 6 5;
+  stroke-width: 1.2;
+}
+
+.valuation-reference-line-low {
+  stroke: #059669;
+}
+
+.valuation-reference-line-mid {
+  stroke: #d97706;
+}
+
+.valuation-reference-line-high {
+  stroke: #dc2626;
+}
+
+.valuation-reference-label {
+  font-size: 10px;
+  font-weight: 500;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+}
+
+.valuation-reference-label-low {
+  fill: #047857;
+}
+
+.valuation-reference-label-mid {
+  fill: #b45309;
+}
+
+.valuation-reference-label-high {
+  fill: #b91c1c;
+}
+
 .valuation-band {
   fill: rgba(15, 118, 110, 0.16);
 }
@@ -561,6 +598,11 @@ tr:last-child td {
 .legend-current {
   height: 0 !important;
   border-top: 2px dashed #475569;
+}
+
+.legend-reference {
+  height: 0 !important;
+  border-top: 2px dashed #d97706;
 }
 
 .legend-band {

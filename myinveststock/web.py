@@ -913,6 +913,29 @@ def _price_index_on_or_after(price_dates: list[object], date_value: object) -> i
     return max(len(price_dates) - 1, 0)
 
 
+def _spread_chart_label_positions(
+    entries: list[tuple[str, float]],
+    *,
+    top: float,
+    bottom: float,
+    min_gap: float = 12.0,
+) -> dict[str, float]:
+    sorted_entries = sorted(entries, key=lambda item: item[1])
+    positions: dict[str, float] = {}
+    previous = top - min_gap
+    for key, y in sorted_entries:
+        label_y = min(max(y - 4.0, top + 12.0), bottom - 6.0)
+        if label_y < previous + min_gap:
+            label_y = previous + min_gap
+        positions[key] = label_y
+        previous = label_y
+    overflow = previous - (bottom - 6.0)
+    if overflow > 0:
+        for key, _ in sorted_entries:
+            positions[key] = max(top + 12.0, positions[key] - overflow)
+    return positions
+
+
 def _render_close_price_valuation_chart(
     valuation_points: list[dict[str, object]],
     price_points: list[dict[str, object]],
@@ -1036,6 +1059,33 @@ def _render_close_price_valuation_chart(
         </g>"""
         )
 
+    latest_reference_lines = ""
+    if positioned_valuations:
+        latest = positioned_valuations[-1]
+        reference_items = [
+            ("low", "保守", "valuation-reference-line-low", "valuation-reference-label-low", float(latest["low"]), float(latest["y_low"])),
+            ("mid", "合理", "valuation-reference-line-mid", "valuation-reference-label-mid", float(latest["mid"]), float(latest["y_mid"])),
+            ("high", "乐观", "valuation-reference-line-high", "valuation-reference-label-high", float(latest["high"]), float(latest["y_high"])),
+        ]
+        label_positions = _spread_chart_label_positions(
+            [(key, y) for key, _, _, _, _, y in reference_items],
+            top=top,
+            bottom=plot_bottom,
+        )
+        reference_rows = []
+        for key, label, line_class, label_class, value, y in reference_items:
+            tooltip = f"最新参考价 | {label} {fmt_num(value)}"
+            reference_rows.append(
+                f"""<g>
+          <title>{esc(tooltip)}</title>
+          <line class="valuation-reference-line {line_class}" x1="0.0" y1="{y:.1f}" x2="{width:.1f}" y2="{y:.1f}"></line>
+          <text class="valuation-reference-label {label_class}" x="{left + 8.0:.1f}" y="{label_positions[key]:.1f}">{esc(label)} {fmt_num(value)}</text>
+        </g>"""
+            )
+        latest_reference_lines = f"""<g class="valuation-reference-layer">
+            {''.join(reference_rows)}
+          </g>"""
+
     first_date = price_points[0]["date"]
     last_date = price_points[-1]["date"]
     return f"""<section class="section-block">
@@ -1055,12 +1105,14 @@ def _render_close_price_valuation_chart(
             {''.join(mid_lines)}
             {''.join(markers)}
           </g>
+          {latest_reference_lines}
           {current_line}
           {''.join(x_labels)}
         </svg>
         <div class="valuation-legend">
           <span><i class="legend-close"></i>{esc(BULL_MARKET_START_DATE)}以来收盘价</span>
           <span><i class="legend-current"></i>当前价格</span>
+          <span><i class="legend-reference"></i>保守/合理/乐观参考价</span>
           <span><i class="legend-band"></i>保守-乐观参考区间</span>
           <span><i class="legend-line"></i>合理估值中枢</span>
           <span><i class="legend-dot"></i>个股深研刷新点</span>
