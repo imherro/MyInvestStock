@@ -792,7 +792,7 @@ def _parsed_date(value: object) -> object | None:
 
 def _render_plain_valuation_chart(points: list[dict[str, object]]) -> str:
     if not points:
-        return render_empty_section("合理估值区间历史")
+        return render_empty_section("参考价格区间历史")
 
     width = 760.0
     height = 320.0
@@ -870,10 +870,10 @@ def _render_plain_valuation_chart(points: list[dict[str, object]]) -> str:
         )
 
     return f"""<section class="section-block">
-      <h2>合理估值区间历史</h2>
+      <h2>参考价格区间历史</h2>
       <div class="valuation-chart">
-        <svg class="valuation-history-svg" viewBox="0 0 {width:.0f} {height:.0f}" role="img" aria-label="合理估值区间随时间变化图">
-          <title>合理估值区间随时间变化图</title>
+        <svg class="valuation-history-svg" viewBox="0 0 {width:.0f} {height:.0f}" role="img" aria-label="参考价格区间随时间变化图">
+          <title>参考价格区间随时间变化图</title>
           <line class="valuation-axis-line" x1="{left:.1f}" y1="{top:.1f}" x2="{left:.1f}" y2="{height - bottom:.1f}"></line>
           <line class="valuation-axis-line" x1="{left:.1f}" y1="{height - bottom:.1f}" x2="{width - right:.1f}" y2="{height - bottom:.1f}"></line>
           <text class="valuation-axis-title" x="{left:.1f}" y="16" text-anchor="start">价格 CNY/share</text>
@@ -886,7 +886,7 @@ def _render_plain_valuation_chart(points: list[dict[str, object]]) -> str:
           {''.join(x_labels)}
         </svg>
         <div class="valuation-legend">
-          <span><i class="legend-band"></i>保守-乐观区间</span>
+          <span><i class="legend-band"></i>保守-乐观参考区间</span>
           <span><i class="legend-line"></i>合理估值中枢</span>
           <span><i class="legend-dot"></i>单次财务深研</span>
         </div>
@@ -963,6 +963,15 @@ def _render_close_price_valuation_chart(
           <title>{esc(BULL_MARKET_START_DATE)}以来收盘价折线</title>
         </polyline>"""
     )
+    current_price = float(price_points[-1]["close"])
+    current_date = price_points[-1]["date"]
+    current_y = _chart_y(current_price, y_min, y_max, top, plot_height)
+    current_label_y = min(max(current_y - 6.0, top + 12.0), plot_bottom - 6.0)
+    current_line = f"""<g class="current-price-layer">
+          <title>{esc(current_date)} 当前价 {fmt_num(current_price)}</title>
+          <line class="current-price-line" x1="{left:.1f}" y1="{current_y:.1f}" x2="{plot_right:.1f}" y2="{current_y:.1f}"></line>
+          <text class="current-price-label" x="{plot_right - 6:.1f}" y="{current_label_y:.1f}" text-anchor="end">当前价 {fmt_num(current_price)}</text>
+        </g>"""
 
     positioned_valuations = []
     for point in valuation_points:
@@ -1021,10 +1030,10 @@ def _render_close_price_valuation_chart(
     first_date = price_points[0]["date"]
     last_date = price_points[-1]["date"]
     return f"""<section class="section-block">
-      <h2>合理估值区间历史</h2>
+      <h2>参考价格区间历史</h2>
       <div class="valuation-chart">
-        <svg class="valuation-history-svg" viewBox="0 0 {width:.0f} {height:.0f}" role="img" aria-label="收盘价折线叠加合理估值区间图">
-          <title>收盘价折线叠加合理估值区间图</title>
+        <svg class="valuation-history-svg" viewBox="0 0 {width:.0f} {height:.0f}" role="img" aria-label="收盘价折线叠加参考价格区间图">
+          <title>收盘价折线叠加参考价格区间图</title>
           <line class="valuation-axis-line" x1="{left:.1f}" y1="{top:.1f}" x2="{left:.1f}" y2="{plot_bottom:.1f}"></line>
           <line class="valuation-axis-line" x1="{left:.1f}" y1="{plot_bottom:.1f}" x2="{plot_right:.1f}" y2="{plot_bottom:.1f}"></line>
           <text class="valuation-axis-title" x="{left:.1f}" y="16" text-anchor="start">价格 CNY/share</text>
@@ -1037,11 +1046,13 @@ def _render_close_price_valuation_chart(
             {''.join(mid_lines)}
             {''.join(markers)}
           </g>
+          {current_line}
           {''.join(x_labels)}
         </svg>
         <div class="valuation-legend">
           <span><i class="legend-close"></i>{esc(BULL_MARKET_START_DATE)}以来收盘价</span>
-          <span><i class="legend-band"></i>保守-乐观区间</span>
+          <span><i class="legend-current"></i>当前价格</span>
+          <span><i class="legend-band"></i>保守-乐观参考区间</span>
           <span><i class="legend-line"></i>合理估值中枢</span>
           <span><i class="legend-dot"></i>个股深研刷新点</span>
         </div>
@@ -1052,7 +1063,7 @@ def _render_close_price_valuation_chart(
 def render_valuation_chart(runs: list[object], prices: list[object] | None = None) -> str:
     points = _valuation_chart_points(runs)
     if not points:
-        return render_empty_section("合理估值区间历史")
+        return render_empty_section("参考价格区间历史")
     price_points = _daily_price_points(prices or [])
     if price_points:
         return _render_close_price_valuation_chart(points, price_points)

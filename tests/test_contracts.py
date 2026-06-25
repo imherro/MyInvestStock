@@ -411,7 +411,8 @@ class ContractTests(unittest.TestCase):
             ]
         )
         self.assertIn("<svg", html)
-        self.assertIn("合理估值区间随时间变化图", html)
+        self.assertIn("参考价格区间随时间变化图", html)
+        self.assertIn("<h2>参考价格区间历史</h2>", html)
         self.assertIn("valuation-band", html)
         self.assertIn("valuation-mid-line", html)
         self.assertIn("价格 CNY/share", html)
@@ -461,11 +462,15 @@ class ContractTests(unittest.TestCase):
             },
         ]
         html = render_valuation_chart(runs, prices)
-        self.assertIn("收盘价折线叠加合理估值区间图", html)
+        self.assertIn("收盘价折线叠加参考价格区间图", html)
         self.assertIn("close-price-layer", html)
         self.assertIn("close-price-line", html)
+        self.assertIn("current-price-line", html)
+        self.assertIn("current-price-label", html)
+        self.assertIn("当前价 112.00", html)
         self.assertIn("valuation-step-band", html)
         self.assertIn("legend-close", html)
+        self.assertIn("legend-current", html)
         self.assertIn("2024-09-24以来收盘价", html)
         self.assertIn("个股深研刷新点", html)
         self.assertNotIn("kline-layer", html)
