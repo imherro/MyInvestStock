@@ -23,6 +23,11 @@ from core.valuation import (
     pe_model_value,
     simple_dcf_value,
 )
+from core.valuation.models import (
+    DEFAULT_ROE_BASELINE,
+    PB_CLIP_RANGE,
+    PE_CLIP_RANGE,
+)
 
 from .conclusion import build_conclusion
 
@@ -130,25 +135,114 @@ def _valuation_range(
     peer_result: PeerComparisonResult,
     valuation_inputs: Mapping[str, Any],
 ) -> IntrinsicValueRange:
+    return _valuation_breakdown(
+        features=features,
+        peer_result=peer_result,
+        valuation_inputs=valuation_inputs,
+    )[0]
+
+
+def _clip(value: float, lower: float, upper: float) -> float:
+    return max(lower, min(upper, value))
+
+
+def _valuation_breakdown(
+    *,
+    features: FundamentalFeatures,
+    peer_result: PeerComparisonResult,
+    valuation_inputs: Mapping[str, Any],
+) -> tuple[IntrinsicValueRange, dict[str, Any]]:
     industry_pe = _safe_float(valuation_inputs.get("industry_pe"), peer_result.industry_median_pe)
     if industry_pe <= 0:
         industry_pe = _safe_float(valuation_inputs.get("stock_pe") or valuation_inputs.get("pe"))
+    eps = _safe_float(valuation_inputs.get("eps"))
+    relative_pe_score = _safe_float(valuation_inputs.get("relative_pe_score"), 1.0)
     pe_range = pe_model_value(
-        eps=_safe_float(valuation_inputs.get("eps")),
+        eps=eps,
         industry_pe=industry_pe,
-        relative_pe_score=_safe_float(valuation_inputs.get("relative_pe_score"), 1.0),
+        relative_pe_score=relative_pe_score,
     )
+    book_value_per_share = _safe_float(valuation_inputs.get("book_value_per_share"))
+    industry_pb = _safe_float(valuation_inputs.get("industry_pb"), _safe_float(valuation_inputs.get("pb"), 1.0))
     pb_range = pb_model_value(
-        book_value_per_share=_safe_float(valuation_inputs.get("book_value_per_share")),
+        book_value_per_share=book_value_per_share,
         roe=features.roe_avg,
-        industry_pb=_safe_float(valuation_inputs.get("industry_pb"), _safe_float(valuation_inputs.get("pb"), 1.0)),
+        industry_pb=industry_pb,
     )
+    fcf_per_share = _safe_float(valuation_inputs.get("fcf_per_share"))
     dcf_range = simple_dcf_value(
-        fcf_per_share=_safe_float(valuation_inputs.get("fcf_per_share")),
+        fcf_per_share=fcf_per_share,
         growth_rate=features.profit_growth_3y,
     )
     weights = [_safe_float(item) for item in _as_sequence(valuation_inputs.get("weights"))]
-    return combine_value_ranges([pe_range, pb_range, dcf_range], weights=weights or [0.4, 0.3, 0.3])
+    effective_weights = weights or [0.4, 0.3, 0.3]
+    component_ranges = [pe_range, pb_range, dcf_range]
+    combined = combine_value_ranges(component_ranges, weights=effective_weights)
+
+    adjusted_pe = _clip(industry_pe * relative_pe_score, *PE_CLIP_RANGE)
+    roe_adjustment = features.roe_avg / DEFAULT_ROE_BASELINE if DEFAULT_ROE_BASELINE > 0 else 1.0
+    adjusted_pb = _clip(industry_pb * roe_adjustment, *PB_CLIP_RANGE)
+
+    def component_payload(
+        value_range: IntrinsicValueRange,
+        weight: float,
+        formula: str,
+        inputs: list[str],
+    ) -> dict[str, Any]:
+        return {
+            "method": value_range.method,
+            "weight": _round_float(weight),
+            "intrinsic_value_low": _round_float(value_range.low),
+            "intrinsic_value_mid": _round_float(value_range.mid),
+            "intrinsic_value_high": _round_float(value_range.high),
+            "formula": formula,
+            "inputs": inputs,
+        }
+
+    calculation = {
+        "combined_formula": "final low/mid/high = weighted average of PE, PB and DCF component low/mid/high",
+        "components": [
+            component_payload(
+                pe_range,
+                effective_weights[0],
+                "PE mid = EPS × clipped(industry_pe × relative_pe_score, 5, 50); low/high = mid × 0.8/1.2",
+                [
+                    f"eps={eps:.6g}",
+                    f"industry_pe={industry_pe:.6g}",
+                    f"relative_pe_score={relative_pe_score:.6g}",
+                    f"adjusted_pe={adjusted_pe:.6g}",
+                ],
+            ),
+            component_payload(
+                pb_range,
+                effective_weights[1],
+                "PB mid = book_value_per_share × clipped(industry_pb × roe / 0.12, 0.5, 15); low/high = mid × 0.8/1.2",
+                [
+                    f"book_value_per_share={book_value_per_share:.6g}",
+                    f"industry_pb={industry_pb:.6g}",
+                    f"roe={features.roe_avg:.6g}",
+                    f"roe_adjustment={roe_adjustment:.6g}",
+                    f"adjusted_pb={adjusted_pb:.6g}",
+                ],
+            ),
+            component_payload(
+                dcf_range,
+                effective_weights[2],
+                "DCF = next_fcf / (discount_rate - safe_growth); low/mid/high use 12%/10%/8% discount-rate scenarios",
+                [
+                    f"fcf_per_share={fcf_per_share:.6g}",
+                    f"profit_growth_3y={features.profit_growth_3y:.6g}",
+                    "terminal_growth=0.03",
+                    "discount_rates=0.12/0.10/0.08",
+                ],
+            ),
+        ],
+        "notes": [
+            "Each component range is produced by core/valuation/models.py.",
+            "The final conservative/reasonable/optimistic prices are weighted averages of component low/mid/high.",
+        ],
+    }
+    return combined, calculation
 
 
 def _fundamental_quality(features: FundamentalFeatures) -> dict[str, str]:
@@ -228,7 +322,11 @@ def build_stock_report(input_data: Mapping[str, Any], trace_recorder: TraceRecor
 
     stock_pe = _safe_float(valuation_inputs.get("stock_pe") or valuation_inputs.get("pe"))
     peer_result = compare_to_peers(stock_pe=stock_pe, stock_roe=features.roe_avg, peers=peers)
-    value_range = _valuation_range(features=features, peer_result=peer_result, valuation_inputs=valuation_inputs)
+    value_range, valuation_calculation = _valuation_breakdown(
+        features=features,
+        peer_result=peer_result,
+        valuation_inputs=valuation_inputs,
+    )
     if trace_recorder is not None:
         trace_recorder.record(
             run_id=run_id,
@@ -365,6 +463,7 @@ def build_stock_report(input_data: Mapping[str, Any], trace_recorder: TraceRecor
             "growth_score": _round_float(signal.growth_score),
             "quality_score": _round_float(signal.quality_score),
             "risk_adjusted_score": _round_float(signal.risk_adjusted_score),
+            "calculation": valuation_calculation,
         },
         "peer_comparison": {
             "industry_rank": _industry_rank(peer_result, len(peers)),

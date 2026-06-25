@@ -45,6 +45,22 @@ class Fundamentals(StrictSchemaModel):
     balance_sheet_quality: StrictStr
 
 
+class ValuationComponent(StrictSchemaModel):
+    method: StrictStr
+    weight: StrictFloat
+    intrinsic_value_low: StrictFloat
+    intrinsic_value_mid: StrictFloat
+    intrinsic_value_high: StrictFloat
+    formula: StrictStr
+    inputs: list[StrictStr] = Field(default_factory=list)
+
+
+class ValuationCalculation(StrictSchemaModel):
+    combined_formula: StrictStr
+    components: list[ValuationComponent] = Field(default_factory=list)
+    notes: list[StrictStr] = Field(default_factory=list)
+
+
 class Valuation(StrictSchemaModel):
     pe: StrictFloat | None = None
     pb: StrictFloat | None = None
@@ -61,6 +77,7 @@ class Valuation(StrictSchemaModel):
     growth_score: StrictFloat | None = Field(default=None, ge=0.0, le=100.0)
     quality_score: StrictFloat | None = Field(default=None, ge=0.0, le=100.0)
     risk_adjusted_score: StrictFloat | None = Field(default=None, ge=0.0, le=100.0)
+    calculation: ValuationCalculation | None = None
 
     @model_validator(mode="after")
     def validate_range_order(self) -> Valuation:

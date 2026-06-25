@@ -97,6 +97,14 @@ class ReportAssemblyTests(unittest.TestCase):
         self.assertEqual(first.heavy_position_view, first.conclusion.grade)
         self.assertGreater(first.valuation.intrinsic_value_mid or 0.0, 0.0)
         self.assertIsNotNone(first.valuation.risk_adjusted_score)
+        self.assertIsNotNone(first.valuation.calculation)
+        calculation = first.valuation.calculation
+        self.assertEqual([item.method for item in calculation.components], ["PE", "PB", "DCF"])
+        self.assertEqual([item.weight for item in calculation.components], [0.4, 0.3, 0.3])
+        self.assertIn("weighted average", calculation.combined_formula)
+        self.assertIn("EPS", calculation.components[0].formula)
+        self.assertIn("book_value_per_share", calculation.components[1].inputs[0])
+        self.assertIn("fcf_per_share", calculation.components[2].inputs[0])
 
     def test_report_hash_changes_when_feature_inputs_change(self) -> None:
         baseline = build_stock_report(ASSEMBLY_INPUT)

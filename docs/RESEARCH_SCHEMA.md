@@ -126,6 +126,7 @@ BLOCKED -> FAILED
 - `models.py`：PE、PB、轻量 DCF 和估值区间组合。
 - `peer.py`：行业中位数和分位排名。
 - `signal.py`：估值、增长、质量和风险调整分数。
+- `valuation.calculation`：由 `core/report` 生成的可审计估值拆解，包含 PE/PB/DCF 三个组件的权重、公式、关键输入和各自的保守/合理/乐观区间。
 
 LLM 可以解释这些 deterministic output，但不能替代公式计算。
 

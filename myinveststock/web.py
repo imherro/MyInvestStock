@@ -183,6 +183,15 @@ def fmt_num(value: object, digits: int = 2) -> str:
         return esc(value)
 
 
+def fmt_pct(value: object, digits: int = 2) -> str:
+    if value is None:
+        return "待入库"
+    try:
+        return f"{float(value) * 100:.{digits}f}%"
+    except (TypeError, ValueError):
+        return esc(value)
+
+
 def _num(value: object) -> float | None:
     try:
         return float(value)
@@ -1070,6 +1079,116 @@ def render_valuation_chart(runs: list[object], prices: list[object] | None = Non
     return _render_plain_valuation_chart(points)
 
 
+def _valuation_detail_value(label: str, value: str) -> str:
+    return f"""<div class="valuation-detail-item">
+      <span>{esc(label)}</span>
+      <strong>{esc(value)}</strong>
+    </div>"""
+
+
+def render_valuation_details(latest: object | None) -> str:
+    if not latest:
+        return render_empty_section("估值依据与计算口径")
+    raw = load_json(_row_value(latest, "raw_json"), {})
+    raw_dict = raw if isinstance(raw, dict) else {}
+    valuation = raw_dict.get("valuation") if isinstance(raw_dict.get("valuation"), dict) else {}
+    fundamentals = raw_dict.get("fundamentals") if isinstance(raw_dict.get("fundamentals"), dict) else {}
+    peer = raw_dict.get("peer_comparison") if isinstance(raw_dict.get("peer_comparison"), dict) else {}
+    calculation = valuation.get("calculation") if isinstance(valuation, dict) else None
+    calculation = calculation if isinstance(calculation, dict) else {}
+    components = calculation.get("components") if isinstance(calculation.get("components"), list) else []
+
+    summary = "".join(
+        [
+            _valuation_detail_value("估值方法", str(valuation.get("method") or _row_value(latest, "valuation_method") or "待入库")),
+            _valuation_detail_value("PE", fmt_num(valuation.get("pe"))),
+            _valuation_detail_value("PB", fmt_num(valuation.get("pb"))),
+            _valuation_detail_value("PEG", fmt_num(valuation.get("peg"))),
+            _valuation_detail_value("收入增速", fmt_pct(fundamentals.get("revenue_growth"))),
+            _valuation_detail_value("利润增速", fmt_pct(fundamentals.get("profit_growth"))),
+            _valuation_detail_value("ROE", fmt_pct(fundamentals.get("roe"))),
+            _valuation_detail_value("负债/权益", fmt_num(fundamentals.get("debt_ratio"))),
+            _valuation_detail_value("低估分", fmt_num(valuation.get("undervalued_score"))),
+            _valuation_detail_value("风险调整分", fmt_num(valuation.get("risk_adjusted_score"))),
+        ]
+    )
+
+    if components:
+        rows = []
+        for component in components:
+            if not isinstance(component, dict):
+                continue
+            input_items = component.get("inputs") if isinstance(component.get("inputs"), list) else []
+            inputs = "<br>".join(esc(item) for item in input_items if str(item).strip()) or "待入库"
+            rows.append(
+                f"""<tr>
+      <td>{esc(component.get('method') or '')}</td>
+      <td>{fmt_num(component.get('weight'))}</td>
+      <td>{fmt_num(component.get('intrinsic_value_low'))}</td>
+      <td>{fmt_num(component.get('intrinsic_value_mid'))}</td>
+      <td>{fmt_num(component.get('intrinsic_value_high'))}</td>
+      <td class="formula-cell"><code>{esc(component.get('formula') or '')}</code></td>
+      <td class="formula-cell">{inputs}</td>
+    </tr>"""
+            )
+        table = f"""<div class="table-wrap">
+          <table>
+            <thead><tr><th>模型</th><th>权重</th><th>保守</th><th>合理</th><th>乐观</th><th>计算公式</th><th>关键输入</th></tr></thead>
+            <tbody>{''.join(rows)}</tbody>
+          </table>
+        </div>"""
+        combined = calculation.get("combined_formula") or "最终三档价格按 PE/PB/DCF 组件区间加权平均。"
+        notes = calculation.get("notes") if isinstance(calculation.get("notes"), list) else []
+        note_items = "".join(f"<li>{esc(item)}</li>" for item in notes if str(item).strip())
+    else:
+        table = """<p class="muted">这份旧报告只保存了最终估值区间和模型分数，未落库 PE/PB/DCF 组件拆解。重新运行该股 stock_research 后会生成可复核的组件区间、权重和公式。</p>"""
+        combined = "旧报告缺少组件拆解；可先参考下方同业相对估值和财务输入摘要。"
+        note_items = ""
+
+    assumptions = valuation.get("key_assumptions") if isinstance(valuation.get("key_assumptions"), list) else []
+    assumption_items = "".join(f"<li>{esc(item)}</li>" for item in assumptions if str(item).strip())
+    if peer:
+        peer_items = f"""<li>{esc(peer.get('relative_valuation') or '')}</li>
+          <li>{esc(peer.get('competitive_position') or '')}</li>"""
+    else:
+        peer_items = "<li>同业对比待入库。</li>"
+
+    return f"""<section class="section-block">
+      <h2>估值依据与计算口径</h2>
+      <div class="valuation-detail-grid">{summary}</div>
+      <p class="muted"><strong>最终公式：</strong>{esc(combined)}</p>
+      {table}
+      <div class="two-col valuation-detail-notes">
+        <div>
+          <h3>模型假设</h3>
+          <ul class="risk-list">{assumption_items or '<li>待入库。</li>'}</ul>
+        </div>
+        <div>
+          <h3>同业复核</h3>
+          <ul class="risk-list">{peer_items}</ul>
+        </div>
+      </div>
+      {f'<ul class="risk-list">{note_items}</ul>' if note_items else ''}
+    </section>"""
+
+
+def render_report_links(code: str, latest: object | None) -> str:
+    raw_link = (
+        f"""<a class="text-link" href="/api/stocks/{esc(code)}/research/latest/raw" target="_blank" rel="noopener noreferrer">原始报告 JSON</a>"""
+        if latest
+        else '<span class="muted">原始报告 JSON 待入库</span>'
+    )
+    return f"""<section class="section-block">
+      <h2>原始报告与文档</h2>
+      <div class="link-list">
+        {raw_link}
+        <a class="text-link" href="/docs/RESEARCH_SCHEMA.md" target="_blank" rel="noopener noreferrer">研究报告 Schema</a>
+        <a class="text-link" href="/docs/AUTOMATION.md" target="_blank" rel="noopener noreferrer">自动化与估值口径</a>
+        <a class="text-link" href="/docs/API_CONTRACT.md" target="_blank" rel="noopener noreferrer">接口契约</a>
+      </div>
+    </section>"""
+
+
 def render_stock_queue_status(queue: list[object]) -> str:
     if not queue:
         return ""
@@ -1267,6 +1386,8 @@ def render_stock_page(code: str) -> bytes:
     queue_status_section = render_stock_queue_status(stock_queue)
     signal_matrix_section = render_signal_matrix(upstream_signal, financial_signal, decision_matrix)
     trackable_history_section = render_trackable_history(trackable_history)
+    valuation_details_section = render_valuation_details(latest if latest else None)
+    report_links_section = render_report_links(code, latest if latest else None)
 
     history_rows = "".join(
         f"""<tr>
@@ -1311,6 +1432,8 @@ def render_stock_page(code: str) -> bytes:
       {queue_status_section}
       {signal_matrix_section}
       {render_valuation_chart(chart_runs, chart_prices)}
+      {valuation_details_section}
+      {report_links_section}
       {trackable_history_section}
       <section class="two-col">
         <div class="section-block">
@@ -1499,6 +1622,16 @@ def api_stock(code: str) -> bytes:
     ).encode("utf-8")
 
 
+def api_latest_raw_report(code: str) -> bytes | None:
+    with closing(connect(DB_PATH)) as conn:
+        runs = list_research_runs(conn, code)
+    latest = next((row for row in runs if row["task_type"] == "stock_research"), None)
+    if latest is None:
+        return None
+    raw = load_json(latest["raw_json"], {})
+    return json.dumps(raw, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
+
+
 def api_queue() -> bytes:
     with closing(connect(DB_PATH)) as conn:
         rows = rows_to_dicts(list_queue(conn))
@@ -1531,6 +1664,17 @@ class MyInvestStockHandler(BaseHTTPRequestHandler):
         if path == "/api/queue":
             self.send_bytes(api_queue(), "application/json; charset=utf-8")
             return
+        if path.startswith("/api/stocks/") and path.endswith("/research/latest/raw"):
+            code = path.removeprefix("/api/stocks/").removesuffix("/research/latest/raw").upper()
+            if not STOCK_CODE_RE.match(code):
+                self.send_error(HTTPStatus.BAD_REQUEST, "Invalid stock code")
+                return
+            body = api_latest_raw_report(code)
+            if body is None:
+                self.send_error(HTTPStatus.NOT_FOUND, "No stock research report")
+                return
+            self.send_bytes(body, "application/json; charset=utf-8")
+            return
         if path.startswith("/api/stocks/"):
             code = path.removeprefix("/api/stocks/").upper()
             self.send_bytes(api_stock(code), "application/json; charset=utf-8")
@@ -1541,6 +1685,9 @@ class MyInvestStockHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/static/"):
             self.send_static(path.removeprefix("/static/"))
+            return
+        if path.startswith("/docs/"):
+            self.send_doc(path.removeprefix("/docs/"))
             return
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")
 
@@ -1581,6 +1728,21 @@ class MyInvestStockHandler(BaseHTTPRequestHandler):
             return
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         self.send_bytes(path.read_bytes(), content_type)
+
+    def send_doc(self, relative_path: str) -> None:
+        docs = {
+            "README.md": ROOT / "README.md",
+            "RESEARCH_SCHEMA.md": ROOT / "docs" / "RESEARCH_SCHEMA.md",
+            "AUTOMATION.md": ROOT / "docs" / "AUTOMATION.md",
+            "API_CONTRACT.md": ROOT / "docs" / "API_CONTRACT.md",
+            "ARCHITECTURE.md": ROOT / "docs" / "ARCHITECTURE.md",
+            "DATA_SOURCES.md": ROOT / "docs" / "DATA_SOURCES.md",
+        }
+        path = docs.get(relative_path)
+        if path is None or not path.exists() or not path.is_file():
+            self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+            return
+        self.send_bytes(path.read_bytes(), "text/markdown; charset=utf-8")
 
     def log_message(self, format: str, *args: object) -> None:
         return

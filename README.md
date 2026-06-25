@@ -82,6 +82,7 @@ myinveststock/web.py
 - `signal.py`：输出 `undervalued_score`、`growth_score`、`quality_score`、`risk_adjusted_score`。
 
 `StockResearchReport.valuation` 可以承接 `engine_version` 和四个 signal 分数，保证估值数值不由 prompt 临场生成。
+`StockResearchReport.valuation.calculation` 保存 PE、PB、DCF 三个组件的输入、公式、权重和保守/合理/乐观组件区间。个股页会把这些明细渲染为“估值依据与计算口径”，用于复核最终三档价格。
 
 ## 上游主线信号与矩阵结论
 
@@ -345,6 +346,7 @@ python -m pytest tests -q
 - `/api/queue`：本地研究队列接口，包含 `source_type/source_label` 区分 `可跟踪龙头` 与 `其他请求`。
 - `/api/stocks`：当前股票列表。
 - `/api/stocks/{code}`：单只股票研究数据、队列状态和可跟踪龙头历史。
+- `/api/stocks/{code}/research/latest/raw`：最新完整 `StockResearchReport` 原始 JSON。
 
 ## 主要目录
 

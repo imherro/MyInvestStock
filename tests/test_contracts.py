@@ -43,7 +43,9 @@ from myinveststock.web import (
     metric,
     render_layout,
     render_queue_rows,
+    render_report_links,
     render_signal_matrix,
+    render_valuation_details,
     render_valuation_chart,
     research_run_to_summary,
     upstream_signal_summary,
@@ -492,6 +494,74 @@ class ContractTests(unittest.TestCase):
         self.assertIn("valuation-whisker", html)
         self.assertIn("valuation-mid-dot", html)
         self.assertNotIn("valuation-band", html)
+
+    def test_valuation_details_show_component_formulas_and_links(self) -> None:
+        latest = {
+            "raw_json": json.dumps(
+                {
+                    "valuation": {
+                        "method": "PE+PB+DCF",
+                        "pe": 15.76,
+                        "pb": 3.77,
+                        "peg": 0.15,
+                        "undervalued_score": 100.0,
+                        "risk_adjusted_score": 86.58,
+                        "key_assumptions": ["deterministic engine"],
+                        "calculation": {
+                            "combined_formula": "final low/mid/high = weighted average of PE, PB and DCF",
+                            "components": [
+                                {
+                                    "method": "PE",
+                                    "weight": 0.4,
+                                    "intrinsic_value_low": 100.0,
+                                    "intrinsic_value_mid": 125.0,
+                                    "intrinsic_value_high": 150.0,
+                                    "formula": "PE mid = EPS × adjusted_pe",
+                                    "inputs": ["eps=5", "adjusted_pe=25"],
+                                },
+                                {
+                                    "method": "PB",
+                                    "weight": 0.3,
+                                    "intrinsic_value_low": 80.0,
+                                    "intrinsic_value_mid": 100.0,
+                                    "intrinsic_value_high": 120.0,
+                                    "formula": "PB mid = book_value_per_share × adjusted_pb",
+                                    "inputs": ["book_value_per_share=20", "adjusted_pb=5"],
+                                },
+                                {
+                                    "method": "DCF",
+                                    "weight": 0.3,
+                                    "intrinsic_value_low": 120.0,
+                                    "intrinsic_value_mid": 160.0,
+                                    "intrinsic_value_high": 220.0,
+                                    "formula": "DCF = next_fcf / spread",
+                                    "inputs": ["fcf_per_share=4"],
+                                },
+                            ],
+                        },
+                    },
+                    "fundamentals": {"revenue_growth": 0.05, "profit_growth": 0.3, "roe": 0.21, "debt_ratio": 0.29},
+                    "peer_comparison": {
+                        "relative_valuation": "stock PE 15.76; industry median PE 41.82.",
+                        "competitive_position": "stock ROE 20.98%; industry median ROE 4.27%.",
+                    },
+                },
+                ensure_ascii=False,
+            ),
+            "valuation_method": "PE+PB+DCF",
+        }
+        html = render_valuation_details(latest)
+        self.assertIn("估值依据与计算口径", html)
+        self.assertIn("PE mid = EPS", html)
+        self.assertIn("PB mid = book_value_per_share", html)
+        self.assertIn("DCF = next_fcf", html)
+        self.assertIn("<td>0.40</td>", html)
+        self.assertIn("stock PE 15.76", html)
+
+        links = render_report_links("603259.SH", latest)
+        self.assertIn("/api/stocks/603259.SH/research/latest/raw", links)
+        self.assertIn("/docs/RESEARCH_SCHEMA.md", links)
+        self.assertIn("/docs/AUTOMATION.md", links)
 
     def test_daily_price_cache_roundtrip(self) -> None:
         with TemporaryDirectory() as temp_dir:

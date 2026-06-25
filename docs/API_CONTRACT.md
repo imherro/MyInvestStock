@@ -84,7 +84,17 @@ key_results.primary_output.items
 - `queue`: 该股票的队列状态
 - `trackable_history`: 该股票曾被列为 `A可跟踪龙头` 的日期、评分和报告 ID
 
+## `/api/stocks/{code}/research/latest/raw`
+
+用途：输出最新完整 `StockResearchReport` 原始 JSON，供页面“原始报告 JSON”链接打开复核。
+
+关键约束：
+
+- 只读本地已入库 `stock_research_runs.raw_json`。
+- 不输出 `.env`、token、本地 SQLite 路径或未校验的 assembly input。
+- 如果最新报告包含 `valuation.calculation`，其中会列出 PE/PB/DCF 组件区间、权重、关键输入和最终加权公式。
+
 ## 约束
 
-两个接口都只读，不包含交易指令、现金金额或股数。
+这些接口都只读，不包含交易指令、现金金额或股数。
 新系统只输出 `stock_research` 研究记录；旧任务类型和旧估值记录会在数据库初始化时清理。
