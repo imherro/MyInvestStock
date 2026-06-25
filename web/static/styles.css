@@ -480,18 +480,18 @@ tr:last-child td {
 }
 
 .current-price-line {
-  stroke: #111827;
+  stroke: #475569;
   stroke-dasharray: 6 5;
-  stroke-width: 1.6;
+  stroke-width: 1.2;
 }
 
 .current-price-label {
-  fill: #111827;
-  font-size: 12px;
-  font-weight: 700;
+  fill: #334155;
+  font-size: 10px;
+  font-weight: 500;
   paint-order: stroke;
   stroke: var(--surface);
-  stroke-width: 4px;
+  stroke-width: 3px;
 }
 
 .valuation-band {
@@ -560,7 +560,7 @@ tr:last-child td {
 
 .legend-current {
   height: 0 !important;
-  border-top: 2px dashed #111827;
+  border-top: 2px dashed #475569;
 }
 
 .legend-band {

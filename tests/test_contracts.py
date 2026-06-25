@@ -466,6 +466,7 @@ class ContractTests(unittest.TestCase):
         self.assertIn("close-price-layer", html)
         self.assertIn("close-price-line", html)
         self.assertIn("current-price-line", html)
+        self.assertIn('class="current-price-line" x1="0.0"', html)
         self.assertIn("current-price-label", html)
         self.assertIn("当前价 112.00", html)
         self.assertIn("valuation-step-band", html)

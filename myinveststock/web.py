@@ -969,8 +969,8 @@ def _render_close_price_valuation_chart(
     current_label_y = min(max(current_y - 6.0, top + 12.0), plot_bottom - 6.0)
     current_line = f"""<g class="current-price-layer">
           <title>{esc(current_date)} 当前价 {fmt_num(current_price)}</title>
-          <line class="current-price-line" x1="{left:.1f}" y1="{current_y:.1f}" x2="{plot_right:.1f}" y2="{current_y:.1f}"></line>
-          <text class="current-price-label" x="{plot_right - 6:.1f}" y="{current_label_y:.1f}" text-anchor="end">当前价 {fmt_num(current_price)}</text>
+          <line class="current-price-line" x1="0.0" y1="{current_y:.1f}" x2="{width:.1f}" y2="{current_y:.1f}"></line>
+          <text class="current-price-label" x="{plot_right - 8:.1f}" y="{current_label_y:.1f}" text-anchor="end">当前价 {fmt_num(current_price)}</text>
         </g>"""
 
     positioned_valuations = []
