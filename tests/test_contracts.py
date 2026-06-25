@@ -34,6 +34,7 @@ from myinveststock.leader_index import (
 from myinveststock.theme_index import enrich_leader_item, market_context_summary, theme_context_for, theme_report_meta
 from myinveststock.web import (
     FOOTER_SCRIPT_URL,
+    HEADER_SCRIPT_URL,
     STATIC_ASSET_VERSION,
     decision_matrix_summary,
     financial_signal_summary,
@@ -103,9 +104,19 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             report_meta({"report": {}})
 
-    def test_footer_script_is_in_layout(self) -> None:
+    def test_unified_header_and_footer_scripts_are_in_layout(self) -> None:
         page = render_layout("title", "<p>body</p>").decode("utf-8")
-        self.assertIn(f'<script src="{FOOTER_SCRIPT_URL}" defer></script>', page)
+        self.assertIn("<div data-myinvest-header></div>", page)
+        self.assertIn("<div data-myinvest-footer></div>", page)
+        self.assertIn(
+            f'<script src="{HEADER_SCRIPT_URL}" data-target="[data-myinvest-header]" defer></script>',
+            page,
+        )
+        self.assertIn(
+            f'<script src="{FOOTER_SCRIPT_URL}" data-target="[data-myinvest-footer]" defer></script>',
+            page,
+        )
+        self.assertNotIn('class="app-header"', page)
         self.assertIn(f'/static/styles.css?v={STATIC_ASSET_VERSION}', page)
 
     def test_metric_card_includes_hover_explanation(self) -> None:

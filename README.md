@@ -28,7 +28,7 @@ MyInvestStock 是一个 A 股个股深研工作台，用来承接上游龙头研
 - 龙头确认来自 MyInvestLeader `/api/index` 的个股入口快照；主线强度、生命周期、周期阶段、ETF/板块趋势、拥挤和风险偏好来自 MyInvestTheme `/api/index`。
 - 最终展示使用“MyInvestTheme 主线环境 + MyInvestLeader 个股信号 + 本项目财务安全边际”的矩阵结论，避免用财务高估一票否决主线跟踪价值。
 - Web 默认端口固定为 `8016`。
-- 页面 footer 统一加载 `https://invest.okbbc.com/footer.js`。
+- 页面首尾统一加载 `https://invest.okbbc.com/header.js` 和 `https://invest.okbbc.com/footer.js`。
 - `.env`、本地 SQLite、原始抓取 JSON 和临时产物不提交、不打包给外部审计。
 - `/research?stock={code}` 是主动研究入口：股票不必已出现在 `A可跟踪龙头`，入口只做幂等入队和跳转，不直接执行深研。
 - `research_queue.source_type` 区分 `可跟踪龙头` 与 `其他请求`；`task_queue` 仍是唯一状态源。

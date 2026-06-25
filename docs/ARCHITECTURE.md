@@ -71,10 +71,13 @@ MyInvestStock 的确定性估值只回答“财务安全边际是否足够”。
 
 ## 页面约束
 
-所有页面底部统一加载：
+所有页面首尾统一加载主系统脚本：
 
 ```html
-<script src="https://invest.okbbc.com/footer.js" defer></script>
+<div data-myinvest-header></div>
+<div data-myinvest-footer></div>
+<script src="https://invest.okbbc.com/header.js" data-target="[data-myinvest-header]" defer></script>
+<script src="https://invest.okbbc.com/footer.js" data-target="[data-myinvest-footer]" defer></script>
 ```
 
 Web 侧不写入数据库，所有入库都由脚本或自动化任务完成。

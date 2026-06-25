@@ -46,6 +46,7 @@ def main() -> int:
     leader_source = (ROOT / "myinveststock" / "leader_index.py").read_text(encoding="utf-8")
     schema_source = (ROOT / "core" / "schema" / "stock_report.py").read_text(encoding="utf-8")
     trigger_script = ROOT / "scripts" / "monitor_research_triggers.py"
+    ok &= check("https://invest.okbbc.com/header.js" in config_source, "unified header script is wired")
     ok &= check("https://invest.okbbc.com/footer.js" in config_source, "unified footer script is wired")
     ok &= check('LEADER_INDEX_URL = "https://leader.okbbc.com/api/index"' in config_source, "upstream source is /api/index")
     ok &= check('THEME_INDEX_URL = "https://theme.okbbc.com/api/index"' in config_source, "theme context source is /api/index")

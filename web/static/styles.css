@@ -35,40 +35,12 @@ code {
   font-size: 0.92em;
 }
 
-.app-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 56px;
-  padding: 0 24px;
-  border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.94);
-  backdrop-filter: blur(10px);
-}
-
-.brand {
-  font-weight: 700;
-  text-decoration: none;
-}
-
-.top-nav {
-  display: flex;
-  gap: 16px;
-  color: var(--muted);
-  font-size: 14px;
-}
-
-.top-nav a,
 .text-link,
 .table-link,
 .code-link {
   text-decoration: none;
 }
 
-.top-nav a:hover,
 .text-link:hover,
 .table-link:hover,
 .code-link:hover,
@@ -605,14 +577,9 @@ tr:last-child td {
 }
 
 @media (max-width: 860px) {
-  .app-header,
   .page-title-row {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .app-header {
-    padding: 12px 16px;
   }
 
   .stock-grid,
