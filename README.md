@@ -341,12 +341,18 @@ python -m pytest tests -q
 - `/`：A 可跟踪龙头首页，显示当前股票、评分、市场摘要和个股深研队列。
 - `/stocks/{code}`：个股页，显示估值区间历史、行业地位、竞争格局、上下游、增长率、数倍潜力和重仓研究资格。
 - `/research?stock={code}`：主动研究入口；没有个股页时入队并跳转，有个股页时直接跳转。
+- `/api`：统一接口目录，只返回说明，不触发重计算、写入、交易或同步。
+- `/docs`：浏览器版接口说明。
+- `/redoc`：ReDoc/OpenAPI 文档入口。
+- `/openapi.json`：机器可读 OpenAPI 规格。
 - `/api/index`：对外主结果接口，供其他系统集成，主结果路径为 `key_results.primary_output.items`。
 - `/api/latest`：对外研究成果接口，输出个股战略、财务和估值历史。
 - `/api/queue`：本地研究队列接口，包含 `source_type/source_label` 区分 `可跟踪龙头` 与 `其他请求`。
 - `/api/stocks`：当前股票列表。
 - `/api/stocks/{code}`：单只股票研究数据、队列状态和可跟踪龙头历史。
 - `/api/stocks/{code}/research/latest/raw`：最新完整 `StockResearchReport` 原始 JSON。
+
+首页末尾会展示“接口说明”模块，摘要显示公开接口数量、推荐入口、功能分组和安全边界。除 `/research?stock={code}` 可能写入本地研究队列外，数据接口均为只读；系统不输出交易指令、现金金额或股数。
 
 ## 主要目录
 

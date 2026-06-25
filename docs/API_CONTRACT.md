@@ -6,6 +6,25 @@
 http://127.0.0.1:8016
 ```
 
+## `/api`
+
+用途：统一接口目录，只说明当前系统公开接口，不触发重计算、写入、交易或同步。
+
+关键字段：
+
+- `system_name`、`version`、`description`: 系统身份和接口目录版本。
+- `base_url`: 按当前请求 Host 推导的基础地址。
+- `docs`: 文档入口，包含 `/docs`、`/redoc`、`/openapi.json`。
+- `recommended_entrypoints`: 推荐集成入口。
+- `safety`: 只读边界、非交易边界和例外说明。
+- `groups`: 按功能分组的公开接口，每个接口包含 `method`、`path`、`purpose`、`parameters`、`returns`、`read_only`。
+- `total_endpoints`: 当前公开接口数量。
+
+约束：
+
+- `/api` 自身只读，不访问外部网络，不写数据库。
+- `/research?stock={code}` 在目录中会明确标为非只读，因为它可能写入本地研究队列；该入口仍不产生交易、现金金额或股数。
+
 ## `/api/index`
 
 用途：输出主要结果信息，供其他系统集成。

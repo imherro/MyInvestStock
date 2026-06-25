@@ -670,6 +670,77 @@ tr:last-child td {
   gap: 10px 16px;
 }
 
+.section-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.section-title-row h2 {
+  margin: 0 0 6px;
+}
+
+.api-count-box {
+  min-width: 96px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  text-align: right;
+}
+
+.api-count-box span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.api-count-box strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--text);
+  font-size: 24px;
+}
+
+.api-summary-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.api-summary-grid h3,
+.api-safety-box h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.api-link-list,
+.api-group-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.api-group-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.api-group-pill strong {
+  color: var(--text);
+}
+
+.api-safety-box {
+  margin-top: 14px;
+}
+
 .risk-list {
   margin: 0;
   padding-left: 20px;
@@ -686,8 +757,17 @@ tr:last-child td {
   .card-grid,
   .summary-grid,
   .signal-matrix,
-  .signal-grid {
+  .signal-grid,
+  .api-summary-grid {
     grid-template-columns: 1fr;
+  }
+
+  .section-title-row {
+    display: grid;
+  }
+
+  .api-count-box {
+    text-align: left;
   }
 
   .report-box {

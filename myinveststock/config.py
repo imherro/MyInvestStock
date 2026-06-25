@@ -10,7 +10,7 @@ LEADER_INDEX_URL = "https://leader.okbbc.com/api/index"
 THEME_INDEX_URL = "https://theme.okbbc.com/api/index"
 FOOTER_SCRIPT_URL = "https://invest.okbbc.com/footer.js"
 HEADER_SCRIPT_URL = "https://invest.okbbc.com/header.js"
-STATIC_ASSET_VERSION = "20260625-reference-lines"
+STATIC_ASSET_VERSION = "20260625-api-catalog"
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8016

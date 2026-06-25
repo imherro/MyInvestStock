@@ -41,6 +41,231 @@ from .leader_index import enqueue_requested_stock
 
 STOCK_CODE_RE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
 BULL_MARKET_START_DATE = "2024-09-24"
+SYSTEM_NAME = "MyInvestStock"
+SYSTEM_VERSION = "myinveststock.api.v1"
+SYSTEM_DESCRIPTION = "A股个股深研、财务安全边际和可跟踪龙头研究展示系统。"
+
+
+def public_api_groups() -> list[dict[str, object]]:
+    return [
+        {
+            "name": "文档入口",
+            "description": "接口目录、OpenAPI 和项目文档入口。",
+            "endpoints": [
+                {
+                    "method": "GET",
+                    "path": "/api",
+                    "purpose": "统一接口目录，列出当前系统公开接口和安全边界。",
+                    "parameters": [],
+                    "returns": "系统名称、版本、base_url、文档入口、推荐入口、分组接口清单和 total_endpoints。",
+                    "read_only": True,
+                },
+                {
+                    "method": "GET",
+                    "path": "/docs",
+                    "purpose": "HTML 接口说明页，适合浏览器查看。",
+                    "parameters": [],
+                    "returns": "接口目录 HTML 页面。",
+                    "read_only": True,
+                },
+                {
+                    "method": "GET",
+                    "path": "/redoc",
+                    "purpose": "OpenAPI 文档渲染入口。",
+                    "parameters": [],
+                    "returns": "基于 /openapi.json 的 ReDoc HTML 页面。",
+                    "read_only": True,
+                },
+                {
+                    "method": "GET",
+                    "path": "/openapi.json",
+                    "purpose": "机器可读 OpenAPI 规格。",
+                    "parameters": [],
+                    "returns": "OpenAPI 3.1 JSON。",
+                    "read_only": True,
+                },
+                {
+                    "method": "GET",
+                    "path": "/docs/{document}",
+                    "purpose": "读取白名单内 Markdown 文档。",
+                    "parameters": [
+                        {
+                            "name": "document",
+                            "in": "path",
+                            "required": True,
+                            "description": "README.md、RESEARCH_SCHEMA.md、AUTOMATION.md、API_CONTRACT.md、ARCHITECTURE.md 或 DATA_SOURCES.md。",
+                        }
+                    ],
+                    "returns": "Markdown 文档文本。",
+                    "read_only": True,
+                },
+            ],
+        },
+        {
+            "name": "当前数据",
+            "description": "当前入口、最新研究成果、股票清单和本地队列。",
+            "endpoints": [
+                {
+                    "method": "GET",
+                    "path": "/api/index",
+                    "purpose": "对外主结果接口，供其他系统集成 A 可跟踪龙头。",
+                    "parameters": [],
+                    "returns": "report、source、key_results.primary_output.items、links 和 constraints。",
+                    "read_only": True,
+                },
+                {
+                    "method": "GET",
+                    "path": "/api/latest",
+                    "purpose": "输出当前股票的研究成果、估值历史和决策矩阵。",
+                    "parameters": [],
+                    "returns": "report、source、summary、stocks 和 constraints。",
+                    "read_only": True,
+                },
+                {
+                    "method": "GET",
+                    "path": "/api/stocks",
+                    "purpose": "输出当前最新股票列表和最新报告信息。",
+                    "parameters": [],
+                    "returns": "report 与 items。",
+                    "read_only": True,
+                },
+                {
+                    "method": "GET",
+                    "path": "/api/queue",
+                    "purpose": "输出本地个股深研队列和任务状态。",
+                    "parameters": [],
+                    "returns": "items，包含队列来源、触发原因、状态、任务关键词和 source_label。",
+                    "read_only": True,
+                },
+            ],
+        },
+        {
+            "name": "历史数据",
+            "description": "单股研究历史、可跟踪龙头历史和原始报告。",
+            "endpoints": [
+                {
+                    "method": "GET",
+                    "path": "/api/stocks/{code}",
+                    "purpose": "输出单只股票页面所需数据。",
+                    "parameters": [
+                        {"name": "code", "in": "path", "required": True, "description": "股票代码，例如 603259.SH。"}
+                    ],
+                    "returns": "leader、leader_summary、upstream_signal、research_runs、decision_matrix、queue、trackable_history。",
+                    "read_only": True,
+                },
+                {
+                    "method": "GET",
+                    "path": "/api/stocks/{code}/research/latest/raw",
+                    "purpose": "输出单只股票最新完整 StockResearchReport 原始 JSON。",
+                    "parameters": [
+                        {"name": "code", "in": "path", "required": True, "description": "股票代码，例如 603259.SH。"}
+                    ],
+                    "returns": "最新已入库 stock_research raw_json；没有研究记录时返回 404。",
+                    "read_only": True,
+                },
+            ],
+        },
+        {
+            "name": "分析结果",
+            "description": "Web 页面和主动研究入口。",
+            "endpoints": [
+                {
+                    "method": "GET",
+                    "path": "/stocks/{code}",
+                    "purpose": "单只股票 Web 深研页面。",
+                    "parameters": [
+                        {"name": "code", "in": "path", "required": True, "description": "股票代码，例如 603259.SH。"}
+                    ],
+                    "returns": "HTML 页面，展示行业地位、竞争格局、参考价格区间历史和原始报告链接。",
+                    "read_only": True,
+                },
+                {
+                    "method": "GET",
+                    "path": "/research?stock={code}",
+                    "purpose": "主动研究入口；已有个股页则跳转，没有研究页时把股票加入研究队列后跳转。",
+                    "parameters": [
+                        {"name": "stock", "in": "query", "required": True, "description": "股票代码，例如 300750.SZ。"}
+                    ],
+                    "returns": "303 跳转到 /stocks/{code}，可能产生本地研究队列写入。",
+                    "read_only": False,
+                },
+            ],
+        },
+        {
+            "name": "系统状态",
+            "description": "首页和静态资源。",
+            "endpoints": [
+                {
+                    "method": "GET",
+                    "path": "/",
+                    "purpose": "Web 首页，展示 A 可跟踪龙头和个股深研队列。",
+                    "parameters": [],
+                    "returns": "HTML 首页。",
+                    "read_only": True,
+                },
+                {
+                    "method": "GET",
+                    "path": "/static/{asset}",
+                    "purpose": "Web 静态资源。",
+                    "parameters": [
+                        {"name": "asset", "in": "path", "required": True, "description": "白名单目录下的静态资源路径。"}
+                    ],
+                    "returns": "CSS 等静态文件。",
+                    "read_only": True,
+                },
+            ],
+        },
+    ]
+
+
+def public_api_endpoints(groups: list[dict[str, object]] | None = None) -> list[dict[str, object]]:
+    source_groups = groups if groups is not None else public_api_groups()
+    endpoints: list[dict[str, object]] = []
+    for group in source_groups:
+        for endpoint in group.get("endpoints", []):  # type: ignore[union-attr]
+            if isinstance(endpoint, dict):
+                endpoints.append(endpoint)
+    return endpoints
+
+
+def api_catalog_payload(base_url: str) -> dict[str, object]:
+    groups = public_api_groups()
+    endpoints = public_api_endpoints(groups)
+    return {
+        "schema_version": "myinveststock.api_catalog.v1",
+        "system_name": SYSTEM_NAME,
+        "version": SYSTEM_VERSION,
+        "description": SYSTEM_DESCRIPTION,
+        "base_url": base_url,
+        "docs": {
+            "docs": "/docs",
+            "redoc": "/redoc",
+            "openapi_json": "/openapi.json",
+        },
+        "recommended_entrypoints": [
+            {"path": "/api/index", "purpose": "其他系统集成当前 A 可跟踪龙头。"},
+            {"path": "/api/latest", "purpose": "消费最新个股研究成果和估值历史。"},
+            {"path": "/api/stocks/{code}", "purpose": "读取单股研究历史、队列和可跟踪龙头历史。"},
+            {"path": "/api/queue", "purpose": "查看本地个股深研队列。"},
+            {"path": "/research?stock={code}", "purpose": "主动请求研究一只股票；会写入研究队列。"},
+        ],
+        "safety": {
+            "catalog_read_only": True,
+            "no_recompute": True,
+            "no_trading": True,
+            "no_sync": True,
+            "contains_trade_orders": False,
+            "contains_cash_amounts": False,
+            "contains_share_counts": False,
+            "notes": [
+                "/api 只描述接口，不触发重计算、写入、交易或同步。",
+                "除 /research?stock={code} 可能写入本地研究队列外，其余列出的数据接口均为只读。",
+                "系统输出研究标签和估值解释，不输出交易指令、现金金额或股数。",
+            ],
+        },
+        "groups": groups,
+        "total_endpoints": len(endpoints),
+    }
 
 
 def esc(value: object) -> str:
@@ -636,19 +861,72 @@ def render_queue_rows(queue: list[object]) -> str:
     )
 
 
+def render_api_summary_section(catalog: dict[str, object]) -> str:
+    groups = catalog.get("groups") if isinstance(catalog.get("groups"), list) else []
+    recommended = catalog.get("recommended_entrypoints") if isinstance(catalog.get("recommended_entrypoints"), list) else []
+    safety = catalog.get("safety") if isinstance(catalog.get("safety"), dict) else {}
+    group_items = []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        endpoints = group.get("endpoints") if isinstance(group.get("endpoints"), list) else []
+        group_items.append(
+            f"""<span class="api-group-pill">{esc(group.get('name'))}<strong>{len(endpoints)}</strong></span>"""
+        )
+    recommended_links = []
+    for item in recommended:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "")
+        href = path if "{" not in path and "?" not in path else "/api"
+        recommended_links.append(
+            f"""<a class="text-link" href="{esc(href)}">{esc(path)}</a>"""
+        )
+    safety_notes = safety.get("notes") if isinstance(safety.get("notes"), list) else []
+    safety_items = "".join(f"<li>{esc(note)}</li>" for note in safety_notes)
+    return f"""<section class="content section-block api-summary-section">
+      <div class="section-title-row">
+        <div>
+          <h2>接口说明</h2>
+          <p class="muted">统一接口目录：<a class="text-link" href="/api">/api</a>；OpenAPI：<a class="text-link" href="/openapi.json">/openapi.json</a>。</p>
+        </div>
+        <div class="api-count-box">
+          <span>公开接口</span>
+          <strong>{esc(catalog.get('total_endpoints'))}</strong>
+        </div>
+      </div>
+      <div class="api-summary-grid">
+        <div>
+          <h3>推荐入口</h3>
+          <div class="api-link-list">{''.join(recommended_links)}</div>
+        </div>
+        <div>
+          <h3>功能分组</h3>
+          <div class="api-group-list">{''.join(group_items)}</div>
+        </div>
+      </div>
+      <div class="api-safety-box">
+        <h3>安全边界</h3>
+        <ul class="risk-list">{safety_items}</ul>
+      </div>
+    </section>"""
+
+
 def render_home() -> bytes:
     with closing(connect(DB_PATH)) as conn:
         report = latest_report(conn)
         leaders = list_latest_leaders(conn)
         queue = list_queue(conn)
+    api_summary = render_api_summary_section(api_catalog_payload(""))
     if not report:
-        body = """
+        body = f"""
     <section class="page-band">
       <div class="content">
         <h1>A可跟踪龙头</h1>
         <p class="muted">本地还没有入库数据。先运行 <code>python scripts/ingest_index.py</code>。</p>
       </div>
     </section>
+    {api_summary}
 """
         return render_layout("A可跟踪龙头", body)
 
@@ -705,6 +983,7 @@ def render_home() -> bytes:
         </table>
       </div>
     </section>
+    {api_summary}
 """
     return render_layout("A可跟踪龙头", body)
 
@@ -1692,14 +1971,154 @@ def api_queue() -> bytes:
     return json.dumps({"items": rows}, ensure_ascii=False).encode("utf-8")
 
 
+def api_catalog(base_url: str) -> bytes:
+    return json.dumps(api_catalog_payload(base_url), ensure_ascii=False, indent=2).encode("utf-8")
+
+
+def _openapi_operation_id(method: str, path: str) -> str:
+    normalized = re.sub(r"[^a-zA-Z0-9]+", "_", f"{method.lower()}_{path.strip('/') or 'root'}")
+    return normalized.strip("_")
+
+
+def openapi_spec(base_url: str) -> dict[str, object]:
+    catalog = api_catalog_payload(base_url)
+    paths: dict[str, object] = {}
+    for group in catalog["groups"]:  # type: ignore[index]
+        if not isinstance(group, dict):
+            continue
+        endpoints = group.get("endpoints") if isinstance(group.get("endpoints"), list) else []
+        for endpoint in endpoints:
+            if not isinstance(endpoint, dict):
+                continue
+            method = str(endpoint.get("method") or "GET").lower()
+            raw_path = str(endpoint.get("path") or "/")
+            openapi_path = raw_path.split("?", 1)[0]
+            parameters = []
+            for parameter in endpoint.get("parameters", []):  # type: ignore[union-attr]
+                if not isinstance(parameter, dict):
+                    continue
+                parameters.append(
+                    {
+                        "name": parameter.get("name"),
+                        "in": parameter.get("in"),
+                        "required": bool(parameter.get("required")),
+                        "description": parameter.get("description"),
+                        "schema": {"type": "string"},
+                    }
+                )
+            content_type = "application/json" if openapi_path.startswith("/api") or openapi_path == "/openapi.json" else "text/html"
+            if openapi_path.startswith("/docs/"):
+                content_type = "text/markdown"
+            operation = {
+                "operationId": _openapi_operation_id(method, raw_path),
+                "summary": endpoint.get("purpose"),
+                "description": f"Read only: {endpoint.get('read_only')}",
+                "tags": [group.get("name")],
+                "parameters": parameters,
+                "responses": {
+                    "200": {
+                        "description": str(endpoint.get("returns") or "OK"),
+                        "content": {content_type: {"schema": {"type": "object"}}},
+                    }
+                },
+            }
+            paths.setdefault(openapi_path, {})  # type: ignore[call-arg]
+            paths[openapi_path][method] = operation  # type: ignore[index]
+    return {
+        "openapi": "3.1.0",
+        "info": {
+            "title": SYSTEM_NAME,
+            "version": SYSTEM_VERSION,
+            "description": SYSTEM_DESCRIPTION,
+        },
+        "servers": [{"url": base_url or "/"}],
+        "paths": paths,
+    }
+
+
+def api_openapi(base_url: str) -> bytes:
+    return json.dumps(openapi_spec(base_url), ensure_ascii=False, indent=2).encode("utf-8")
+
+
+def render_docs_page(base_url: str) -> bytes:
+    catalog = api_catalog_payload(base_url)
+    endpoint_rows = []
+    for group in catalog["groups"]:  # type: ignore[index]
+        if not isinstance(group, dict):
+            continue
+        endpoints = group.get("endpoints") if isinstance(group.get("endpoints"), list) else []
+        for endpoint in endpoints:
+            if not isinstance(endpoint, dict):
+                continue
+            readonly = "只读" if endpoint.get("read_only") else "会写入队列"
+            endpoint_rows.append(
+                f"""<tr>
+      <td>{esc(group.get('name'))}</td>
+      <td>{esc(endpoint.get('method'))}</td>
+      <td><code>{esc(endpoint.get('path'))}</code></td>
+      <td>{esc(endpoint.get('purpose'))}</td>
+      <td>{esc(readonly)}</td>
+    </tr>"""
+            )
+    body = f"""
+    <section class="page-band">
+      <div class="content">
+        <h1>接口说明</h1>
+        <p class="muted">{esc(SYSTEM_DESCRIPTION)}</p>
+      </div>
+    </section>
+    {render_api_summary_section(catalog)}
+    <section class="content section-block">
+      <h2>接口清单</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>分组</th><th>方法</th><th>路径</th><th>用途</th><th>只读</th></tr></thead>
+          <tbody>{''.join(endpoint_rows)}</tbody>
+        </table>
+      </div>
+    </section>
+"""
+    return render_layout("接口说明", body)
+
+
+def render_redoc_page(base_url: str) -> bytes:
+    body = f"""
+    <section class="page-band">
+      <div class="content">
+        <h1>ReDoc</h1>
+        <p class="muted">OpenAPI JSON：<a class="text-link" href="/openapi.json">/openapi.json</a></p>
+      </div>
+    </section>
+    <section class="content section-block">
+      <redoc spec-url="/openapi.json"></redoc>
+      <script src="https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js"></script>
+      <noscript><p class="muted">需要启用 JavaScript 渲染 ReDoc；也可以直接打开 <a class="text-link" href="/openapi.json">/openapi.json</a>。</p></noscript>
+    </section>
+"""
+    return render_layout("ReDoc", body)
+
+
 class MyInvestStockHandler(BaseHTTPRequestHandler):
     server_version = "MyInvestStock/0.1"
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
+        base_url = self.request_base_url()
         if path == "/":
             self.send_bytes(render_home(), "text/html; charset=utf-8")
+            return
+        if path == "/api":
+            self.send_bytes(api_catalog(base_url), "application/json; charset=utf-8")
+            return
+        if path == "/openapi.json":
+            self.send_bytes(api_openapi(base_url), "application/json; charset=utf-8")
+            return
+        if path == "/docs":
+            self.send_bytes(render_docs_page(base_url), "text/html; charset=utf-8")
+            return
+        if path == "/redoc":
+            self.send_bytes(render_redoc_page(base_url), "text/html; charset=utf-8")
             return
         if path == "/research":
             self.handle_research_gateway(parsed.query)
@@ -1742,6 +2161,11 @@ class MyInvestStockHandler(BaseHTTPRequestHandler):
             self.send_doc(path.removeprefix("/docs/"))
             return
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+
+    def request_base_url(self) -> str:
+        proto = self.headers.get("X-Forwarded-Proto", "http")
+        host = self.headers.get("Host") or f"{DEFAULT_HOST}:{DEFAULT_PORT}"
+        return f"{proto}://{host}"
 
     def handle_research_gateway(self, query: str) -> None:
         code, requested_name = normalize_stock_query(parse_qs(query))

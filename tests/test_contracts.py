@@ -37,10 +37,13 @@ from myinveststock.web import (
     FOOTER_SCRIPT_URL,
     HEADER_SCRIPT_URL,
     STATIC_ASSET_VERSION,
+    api_catalog_payload,
     decision_matrix_summary,
     financial_signal_summary,
     leader_to_summary,
     metric,
+    openapi_spec,
+    render_api_summary_section,
     render_layout,
     render_queue_rows,
     render_report_links,
@@ -121,6 +124,43 @@ class ContractTests(unittest.TestCase):
         )
         self.assertNotIn('class="app-header"', page)
         self.assertIn(f'/static/styles.css?v={STATIC_ASSET_VERSION}', page)
+
+    def test_api_catalog_lists_public_endpoints_and_safety(self) -> None:
+        payload = api_catalog_payload("http://127.0.0.1:8016")
+        self.assertEqual(payload["system_name"], "MyInvestStock")
+        self.assertEqual(payload["base_url"], "http://127.0.0.1:8016")
+        self.assertEqual(payload["docs"]["docs"], "/docs")  # type: ignore[index]
+        self.assertEqual(payload["docs"]["redoc"], "/redoc")  # type: ignore[index]
+        self.assertEqual(payload["docs"]["openapi_json"], "/openapi.json")  # type: ignore[index]
+        self.assertGreaterEqual(payload["total_endpoints"], 10)
+        group_names = [group["name"] for group in payload["groups"]]  # type: ignore[index]
+        self.assertIn("文档入口", group_names)
+        self.assertIn("当前数据", group_names)
+        self.assertIn("历史数据", group_names)
+        self.assertIn("分析结果", group_names)
+        self.assertIn("系统状态", group_names)
+        endpoints = [
+            endpoint
+            for group in payload["groups"]  # type: ignore[index]
+            for endpoint in group["endpoints"]
+        ]
+        self.assertTrue(any(endpoint["path"] == "/api" and endpoint["read_only"] for endpoint in endpoints))
+        self.assertTrue(any(endpoint["path"] == "/api/index" and endpoint["read_only"] for endpoint in endpoints))
+        self.assertTrue(any(endpoint["path"] == "/research?stock={code}" and not endpoint["read_only"] for endpoint in endpoints))
+        self.assertIn("/api 只描述接口", " ".join(payload["safety"]["notes"]))  # type: ignore[index]
+
+    def test_openapi_and_home_api_summary_use_catalog(self) -> None:
+        spec = openapi_spec("http://127.0.0.1:8016")
+        self.assertEqual(spec["openapi"], "3.1.0")
+        self.assertIn("/api", spec["paths"])  # type: ignore[operator]
+        self.assertIn("/api/index", spec["paths"])  # type: ignore[operator]
+        self.assertIn("/research", spec["paths"])  # type: ignore[operator]
+
+        html = render_api_summary_section(api_catalog_payload(""))
+        self.assertIn("接口说明", html)
+        self.assertIn("/api", html)
+        self.assertIn("公开接口", html)
+        self.assertIn("安全边界", html)
 
     def test_metric_card_includes_hover_explanation(self) -> None:
         html = metric("估值安全", 83.36)
