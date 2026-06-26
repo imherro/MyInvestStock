@@ -670,6 +670,46 @@ tr:last-child td {
   gap: 10px 16px;
 }
 
+.research-entry-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.research-entry-form textarea {
+  width: 100%;
+  min-height: 128px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  resize: vertical;
+}
+
+.research-entry-form textarea:focus {
+  border-color: var(--accent);
+  outline: 2px solid rgba(15, 118, 110, 0.16);
+}
+
+.research-entry-form button {
+  justify-self: start;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid #0f766e;
+  border-radius: 8px;
+  color: #fff;
+  background: #0f766e;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.research-entry-form button:hover {
+  background: #115e59;
+}
+
 .section-title-row {
   display: flex;
   align-items: flex-start;

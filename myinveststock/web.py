@@ -26,6 +26,7 @@ from .db import (
     connect,
     get_known_leader,
     get_latest_leader,
+    init_db,
     latest_report,
     list_daily_prices,
     list_latest_leaders,
@@ -40,6 +41,10 @@ from .db import (
 from .leader_index import enqueue_requested_stock
 
 STOCK_CODE_RE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
+STOCK_CODE_TOKEN_RE = re.compile(
+    r"(?<![A-Z0-9])((?:SH|SZ|BJ)[\s._-]*\d{6}|\d{6}[\s._-]*(?:SH|SZ|BJ)|[0368]\d{5})(?![A-Z0-9])",
+    re.IGNORECASE,
+)
 BULL_MARKET_START_DATE = "2024-09-24"
 SYSTEM_NAME = "MyInvestStock"
 SYSTEM_VERSION = "myinveststock.api.v1"
@@ -189,6 +194,21 @@ def public_api_groups() -> list[dict[str, object]]:
                     "returns": "303 跳转到 /stocks/{code}，可能产生本地研究队列写入。",
                     "read_only": False,
                 },
+                {
+                    "method": "POST",
+                    "path": "/research/bulk",
+                    "purpose": "批量主动研究入口；从粘贴文本中提取股票代码并加入待研究队列。",
+                    "parameters": [
+                        {
+                            "name": "stocks",
+                            "in": "formData",
+                            "required": True,
+                            "description": "任意文本，系统会提取 000858.SZ、SZ000858、SH688041、688041.SH 或裸 6 位股票代码。",
+                        }
+                    ],
+                    "returns": "HTML 批量入队结果页，列出新增、已存在、无效或失败的股票代码。",
+                    "read_only": False,
+                },
             ],
         },
         {
@@ -248,6 +268,7 @@ def api_catalog_payload(base_url: str) -> dict[str, object]:
             {"path": "/api/stocks/{code}", "purpose": "读取单股研究历史、队列和可跟踪龙头历史。"},
             {"path": "/api/queue", "purpose": "查看本地个股深研队列。"},
             {"path": "/research?stock={code}", "purpose": "主动请求研究一只股票；会写入研究队列。"},
+            {"path": "/research/bulk", "purpose": "从粘贴文本批量提取股票代码并写入研究队列。"},
         ],
         "safety": {
             "catalog_read_only": True,
@@ -259,7 +280,7 @@ def api_catalog_payload(base_url: str) -> dict[str, object]:
             "contains_share_counts": False,
             "notes": [
                 "/api 只描述接口，不触发重计算、写入、交易或同步。",
-                "除 /research?stock={code} 可能写入本地研究队列外，其余列出的数据接口均为只读。",
+                "除 /research?stock={code} 和 /research/bulk 可能写入本地研究队列外，其余列出的数据接口均为只读。",
                 "系统输出研究标签和估值解释，不输出交易指令、现金金额或股数。",
             ],
         },
@@ -861,6 +882,55 @@ def render_queue_rows(queue: list[object]) -> str:
     )
 
 
+def render_bulk_research_entry_section() -> str:
+    return """<section class="content section-block research-entry-section">
+      <h2>深研个股入口</h2>
+      <p class="muted">粘贴任意文本，系统会提取股票代码并加入待研究队列。支持 <code>000858.SZ</code>、<code>SZ000858</code>、<code>SH688041</code>、<code>688041.SH</code> 和可推断交易所的 6 位代码。</p>
+      <form class="research-entry-form" method="post" action="/research/bulk">
+        <textarea name="stocks" rows="5" placeholder="例如：五粮液 000858.SZ；寒武纪 SH688256；688041.SH"></textarea>
+        <button type="submit">提取并加入待研究队列</button>
+      </form>
+    </section>"""
+
+
+def render_bulk_research_result(result: dict[str, object]) -> bytes:
+    rows = []
+    for item in result.get("results", []):  # type: ignore[union-attr]
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("code") or "")
+        status = str(item.get("status") or "")
+        status_label = {"queued": "已入队", "exists": "已存在", "error": "失败"}.get(status, status)
+        rows.append(
+            f"""<tr>
+      <td>{xueqiu_stock_link(code)}</td>
+      <td>{stock_page_link(code, item.get('name') or code)}</td>
+      <td>{esc(status_label)}</td>
+      <td>{esc(item.get('message'))}</td>
+    </tr>"""
+        )
+    if not rows:
+        rows.append('<tr><td colspan="4" class="empty-cell">没有识别到股票代码。</td></tr>')
+    body = f"""
+    <section class="page-band">
+      <div class="content">
+        <h1>批量深研入队结果</h1>
+        <p class="muted">识别 {esc(result.get('input_count'))} 只；新增 {esc(result.get('queued_count'))} 只；已存在 {esc(result.get('existing_count'))} 只；失败 {esc(result.get('error_count'))} 只。</p>
+      </div>
+    </section>
+    <section class="content section-block">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>代码</th><th>名称</th><th>状态</th><th>说明</th></tr></thead>
+          <tbody>{''.join(rows)}</tbody>
+        </table>
+      </div>
+      <p class="muted"><a class="text-link" href="/">返回首页</a> · <a class="text-link" href="/api/queue">查看队列 JSON</a></p>
+    </section>
+"""
+    return render_layout("批量深研入队结果", body)
+
+
 def render_api_summary_section(catalog: dict[str, object]) -> str:
     groups = catalog.get("groups") if isinstance(catalog.get("groups"), list) else []
     recommended = catalog.get("recommended_entrypoints") if isinstance(catalog.get("recommended_entrypoints"), list) else []
@@ -926,6 +996,7 @@ def render_home() -> bytes:
         <p class="muted">本地还没有入库数据。先运行 <code>python scripts/ingest_index.py</code>。</p>
       </div>
     </section>
+    {render_bulk_research_entry_section()}
     {api_summary}
 """
         return render_layout("A可跟踪龙头", body)
@@ -974,6 +1045,7 @@ def render_home() -> bytes:
     <section class="content stock-grid">
       {''.join(cards)}
     </section>
+    {render_bulk_research_entry_section()}
     <section class="content section-block">
       <h2>个股深研队列</h2>
       <div class="table-wrap">
@@ -1663,8 +1735,83 @@ def _stock_exists(conn: object, code: str) -> tuple[bool, str | None]:
     return False, None
 
 
+def _infer_exchange(symbol: str) -> str | None:
+    if symbol.startswith(("0", "3")):
+        return "SZ"
+    if symbol.startswith("6"):
+        return "SH"
+    if symbol.startswith("8"):
+        return "BJ"
+    return None
+
+
+def normalize_stock_code_token(value: object) -> str | None:
+    token = re.sub(r"\s+", "", str(value or "").strip().upper())
+    token = token.replace("_", ".").replace("-", ".")
+    match = re.fullmatch(r"(SH|SZ|BJ)\.?(\d{6})", token)
+    if match:
+        exchange, symbol = match.groups()
+        return f"{symbol}.{exchange}"
+    match = re.fullmatch(r"(\d{6})\.?(SH|SZ|BJ)", token)
+    if match:
+        symbol, exchange = match.groups()
+        return f"{symbol}.{exchange}"
+    match = re.fullmatch(r"([0368]\d{5})", token)
+    if match:
+        symbol = match.group(1)
+        exchange = _infer_exchange(symbol)
+        if exchange:
+            return f"{symbol}.{exchange}"
+    return None
+
+
+def extract_stock_codes(text: str) -> list[str]:
+    seen: set[str] = set()
+    codes: list[str] = []
+    for match in STOCK_CODE_TOKEN_RE.finditer(text or ""):
+        code = normalize_stock_code_token(match.group(1))
+        if code and code not in seen:
+            seen.add(code)
+            codes.append(code)
+    return codes
+
+
+def enqueue_extracted_stock_codes(text: str, *, db_path: Path | str | None = None) -> dict[str, object]:
+    db_target = Path(db_path) if db_path is not None else DB_PATH
+    init_db(db_target)
+    codes = extract_stock_codes(text)
+    results: list[dict[str, object]] = []
+    for code in codes:
+        try:
+            with closing(connect(db_target)) as conn:
+                exists, known_name = _stock_exists(conn, code)
+            if exists:
+                results.append({"code": code, "name": known_name or code, "status": "exists", "message": "已有研究页或队列"})
+                continue
+            queued = enqueue_requested_stock(code, name=known_name, db_path=db_target)
+            results.append(
+                {
+                    "code": code,
+                    "name": queued.get("name") or code,
+                    "status": "queued",
+                    "message": "已加入待研究队列",
+                    "report_id": queued.get("report_id"),
+                }
+            )
+        except Exception as exc:  # pragma: no cover - defensive per-code isolation
+            results.append({"code": code, "name": code, "status": "error", "message": str(exc)})
+    return {
+        "input_count": len(codes),
+        "queued_count": sum(1 for item in results if item["status"] == "queued"),
+        "existing_count": sum(1 for item in results if item["status"] == "exists"),
+        "error_count": sum(1 for item in results if item["status"] == "error"),
+        "codes": codes,
+        "results": results,
+    }
+
+
 def normalize_stock_query(params: dict[str, list[str]]) -> tuple[str | None, str | None]:
-    stock = (params.get("stock") or params.get("code") or [""])[0].strip().upper()
+    stock = normalize_stock_code_token((params.get("stock") or params.get("code") or [""])[0])
     name = (params.get("name") or [""])[0].strip()
     return (stock or None), (name or None)
 
@@ -1994,8 +2141,20 @@ def openapi_spec(base_url: str) -> dict[str, object]:
             raw_path = str(endpoint.get("path") or "/")
             openapi_path = raw_path.split("?", 1)[0]
             parameters = []
+            form_properties: dict[str, object] = {}
+            form_required: list[str] = []
             for parameter in endpoint.get("parameters", []):  # type: ignore[union-attr]
                 if not isinstance(parameter, dict):
+                    continue
+                if parameter.get("in") == "formData":
+                    name = str(parameter.get("name") or "")
+                    if name:
+                        form_properties[name] = {
+                            "type": "string",
+                            "description": parameter.get("description"),
+                        }
+                        if parameter.get("required"):
+                            form_required.append(name)
                     continue
                 parameters.append(
                     {
@@ -2022,6 +2181,19 @@ def openapi_spec(base_url: str) -> dict[str, object]:
                     }
                 },
             }
+            if form_properties:
+                operation["requestBody"] = {
+                    "required": bool(form_required),
+                    "content": {
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "type": "object",
+                                "properties": form_properties,
+                                "required": form_required,
+                            }
+                        }
+                    },
+                }
             paths.setdefault(openapi_path, {})  # type: ignore[call-arg]
             paths[openapi_path][method] = operation  # type: ignore[index]
     return {
@@ -2162,6 +2334,14 @@ class MyInvestStockHandler(BaseHTTPRequestHandler):
             return
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")
 
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        path = unquote(parsed.path)
+        if path == "/research/bulk":
+            self.handle_bulk_research_gateway()
+            return
+        self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+
     def request_base_url(self) -> str:
         proto = self.headers.get("X-Forwarded-Proto", "http")
         host = self.headers.get("Host") or f"{DEFAULT_HOST}:{DEFAULT_PORT}"
@@ -2185,6 +2365,20 @@ class MyInvestStockHandler(BaseHTTPRequestHandler):
         self.send_header("Location", location)
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
+
+    def handle_bulk_research_gateway(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+        except ValueError:
+            length = 0
+        if length > 200_000:
+            self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "Request too large")
+            return
+        body = self.rfile.read(length).decode("utf-8", errors="replace")
+        params = parse_qs(body, keep_blank_values=True)
+        text = (params.get("stocks") or params.get("text") or [""])[0]
+        result = enqueue_extracted_stock_codes(text)
+        self.send_bytes(render_bulk_research_result(result), "text/html; charset=utf-8")
 
     def send_bytes(self, body: bytes, content_type: str) -> None:
         self.send_response(HTTPStatus.OK)

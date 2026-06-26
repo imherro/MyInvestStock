@@ -39,11 +39,15 @@ from myinveststock.web import (
     STATIC_ASSET_VERSION,
     api_catalog_payload,
     decision_matrix_summary,
+    enqueue_extracted_stock_codes,
+    extract_stock_codes,
     financial_signal_summary,
     leader_to_summary,
     metric,
+    normalize_stock_query,
     openapi_spec,
     render_api_summary_section,
+    render_bulk_research_entry_section,
     render_layout,
     render_queue_rows,
     render_report_links,
@@ -147,6 +151,7 @@ class ContractTests(unittest.TestCase):
         self.assertTrue(any(endpoint["path"] == "/api" and endpoint["read_only"] for endpoint in endpoints))
         self.assertTrue(any(endpoint["path"] == "/api/index" and endpoint["read_only"] for endpoint in endpoints))
         self.assertTrue(any(endpoint["path"] == "/research?stock={code}" and not endpoint["read_only"] for endpoint in endpoints))
+        self.assertTrue(any(endpoint["path"] == "/research/bulk" and endpoint["method"] == "POST" and not endpoint["read_only"] for endpoint in endpoints))
         self.assertIn("/api 只描述接口", " ".join(payload["safety"]["notes"]))  # type: ignore[index]
 
     def test_openapi_and_home_api_summary_use_catalog(self) -> None:
@@ -155,12 +160,34 @@ class ContractTests(unittest.TestCase):
         self.assertIn("/api", spec["paths"])  # type: ignore[operator]
         self.assertIn("/api/index", spec["paths"])  # type: ignore[operator]
         self.assertIn("/research", spec["paths"])  # type: ignore[operator]
+        self.assertIn("post", spec["paths"]["/research/bulk"])  # type: ignore[index]
 
         html = render_api_summary_section(api_catalog_payload(""))
         self.assertIn("接口说明", html)
         self.assertIn("/api", html)
         self.assertIn("公开接口", html)
         self.assertIn("安全边界", html)
+
+    def test_bulk_research_entry_extracts_stock_codes(self) -> None:
+        text = "五粮液 000858.SZ，重复 SZ000858；芯片 SH688041，另一种 688041.SH，裸代码 300750 和 688256"
+        self.assertEqual(extract_stock_codes(text), ["000858.SZ", "688041.SH", "300750.SZ", "688256.SH"])
+        self.assertEqual(normalize_stock_query({"stock": ["SZ000858"]}), ("000858.SZ", None))
+        html = render_bulk_research_entry_section()
+        self.assertIn('action="/research/bulk"', html)
+        self.assertIn('name="stocks"', html)
+
+    def test_bulk_research_entry_enqueues_new_codes_and_skips_existing(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "bulk.sqlite"
+            with patch("myinveststock.leader_index.lookup_tushare_stock_name", side_effect=lambda code: {"000858.SZ": "五粮液", "688041.SH": "海光信息"}.get(code)):
+                first = enqueue_extracted_stock_codes("000858.SZ SH688041 000858", db_path=db_path)
+                second = enqueue_extracted_stock_codes("SZ000858 688041.SH", db_path=db_path)
+            with closing(connect(db_path)) as conn:
+                rows = list_queue(conn)
+            self.assertEqual(first["queued_count"], 2)
+            self.assertEqual(second["existing_count"], 2)
+            self.assertEqual({row["code"] for row in rows}, {"000858.SZ", "688041.SH"})
+            self.assertEqual({row["source_type"] for row in rows}, {QUEUE_SOURCE_REQUEST})
 
     def test_metric_card_includes_hover_explanation(self) -> None:
         html = metric("估值安全", 83.36)
