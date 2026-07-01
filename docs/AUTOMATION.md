@@ -71,12 +71,14 @@ python scripts/monitor_research_triggers.py --dry-run
 
 ## 个股深研队列消化自动化
 
-用途：高频运行，持续消化本地待研究队列。每次运行只处理一条任务，处理完即结束。
+用途：启动后持续消化本地待研究队列，直到队列为空才结束。单股之间保留 10 分钟间隔。
 
 规则：
 
 - 只从本地 `research_queue` 领取 pending 任务，不重新扩展股票池。
-- 每次只研究一只股票。
+- 每轮只领取并研究一只股票，禁止在同一轮里同时研究多只股票。
+- 完成一只股票的入库、验证和汇报后，等待 10 分钟，再领取下一条 pending 任务。
+- 一旦启动，就持续循环执行“领取 -> 单股研究 -> 入库 -> 验证 -> 等待 10 分钟”，直到队列为空。
 - 每条任务的 `task_type` 必须是 `stock_research`。
 - `trigger_reason` 只解释本次为什么重研，不拆分不同流程。
 - 合理估值区间和 valuation signal 必须由 `core/valuation` 的确定性估值引擎生成。
@@ -89,14 +91,16 @@ python scripts/monitor_research_triggers.py --dry-run
 ```text
 执行 MyInvestStock 个股深研队列消化。
 
-核心原则：每次自动化运行只处理一条 pending 队列任务，只研究一只股票。不要一次研究多只股票，不要重新扩展股票池。
+核心原则：本自动化一旦启动，就持续消化所有 pending 队列任务，直到队列为空。每一轮只领取一条 pending 任务，只研究这一只股票；禁止一次研究多只股票；不要重新扩展股票池。每只股票研究完成并入库后，等待 10 分钟再领取下一只。
 
 执行步骤：
 1. 使用 python scripts/generate_single_stock_prompt.py --next --claim 领取下一条 pending 任务。
-2. 如果没有待研究任务，验证 http://127.0.0.1:8016/api/index 和 http://127.0.0.1:8016/api/latest 可用后，汇报“队列为空”，本次结束。
+2. 如果没有待研究任务，验证 http://127.0.0.1:8016/api/index 和 http://127.0.0.1:8016/api/latest 可用后，汇报“队列为空，已完成本轮全部队列消化”，本次结束。
 3. 如果领取到任务，只研究这一只股票，输出完整个股深研结构化输入。
 4. 运行 scripts/build_research_report.py 生成最终 StockResearchReport。
 5. 运行 scripts/import_research_run.py 入库。
+6. 验证入库和核心接口可用，汇报本轮处理的股票代码、股票名称、触发原因、入库状态和主要结论摘要。
+7. 如果仍有 pending 队列，等待 10 分钟，再回到步骤 1；如果队列为空，执行步骤 2 的结束验证并停止。
 
 数据原则：
 - Tushare 是 A 股结构化主源，使用本地 .env，但不要输出任何 token。
@@ -106,10 +110,11 @@ python scripts/monitor_research_triggers.py --dry-run
 - 不输出交易指令，不输出现金金额，不输出股数。
 - “重仓资格”只能是研究标签，例如 不具备、观察、可跟踪、核心仓研究资格、高估暂缓。
 
-完成后：
+每轮完成后：
 - 验证 http://127.0.0.1:8016/api/index 返回 200。
 - 验证 http://127.0.0.1:8016/api/latest 返回 200。
-- 汇报本次处理的股票代码、股票名称、触发原因、入库状态、主要结论摘要。
+- 汇报本轮处理的股票代码、股票名称、触发原因、入库状态、主要结论摘要。
+- 不要在队列未清空时结束自动化；队列未清空时必须等待 10 分钟后继续领取下一条。
 - 不要提交 .env、data/local/*.sqlite、data/raw/*.json。
 ```
 
